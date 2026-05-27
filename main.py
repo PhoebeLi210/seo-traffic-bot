@@ -21,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from src.config_manager import config
 from src.visitor import visitor_manager
 from src.monitor import monitor
+from src.web_dashboard import dashboard
 from loguru import logger
 
 
@@ -154,6 +155,19 @@ def main():
         help="显示当前配置"
     )
     
+    parser.add_argument(
+        "--dashboard",
+        action="store_true",
+        help="启动统计仪表盘"
+    )
+    
+    parser.add_argument(
+        "--dashboard-port",
+        type=int,
+        default=8080,
+        help="仪表盘端口号 (默认: 8080)"
+    )
+    
     args = parser.parse_args()
     
     bot = TrafficBot()
@@ -162,8 +176,25 @@ def main():
         bot.show_stats()
     elif args.config:
         bot.show_config()
+    elif args.dashboard:
+        # 启动仪表盘
+        dashboard.port = args.dashboard_port
+        dashboard.start_server()
+        print(f"\n📊 统计仪表盘已启动: http://0.0.0.0:{args.dashboard_port}")
+        print("按 Ctrl+C 停止\n")
+        try:
+            while True:
+                import time
+                time.sleep(1)
+        except KeyboardInterrupt:
+            dashboard.stop_server()
     elif args.continuous:
+        # 持续运行模式，同时启动仪表盘
+        dashboard.port = args.dashboard_port
+        dashboard.start_server()
+        logger.info(f"📊 统计仪表盘已启动: http://0.0.0.0:{args.dashboard_port}")
         asyncio.run(bot.run_continuous())
+        dashboard.stop_server()
     else:
         asyncio.run(bot.run_once())
 
