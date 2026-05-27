@@ -66,7 +66,7 @@ class Monitor:
     
     def _setup_logging(self):
         """设置日志"""
-        log_file = self.monitoring_config.log_file or "logs/traffic_bot.log"
+        log_file = getattr(self.monitoring_config, 'log_file', None) or "logs/traffic_bot.log"
         
         logger.remove()
         logger.add(

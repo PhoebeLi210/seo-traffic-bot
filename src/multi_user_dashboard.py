@@ -383,8 +383,7 @@ class MultiUserDashboard:
                     if user:
                         session_id = secrets.token_hex(16)
                         dashboard.sessions[session_id] = user.user_id
-                        self._set_cookie('session_id', session_id)
-                        self._redirect('/dashboard')
+                        self._redirect('/dashboard', {'session_id': session_id})
                     else:
                         self._send_html(dashboard.generate_login_page('用户名或密码错误'))
                 
@@ -407,8 +406,7 @@ class MultiUserDashboard:
                     if user:
                         session_id = secrets.token_hex(16)
                         dashboard.sessions[session_id] = user.user_id
-                        self._set_cookie('session_id', session_id)
-                        self._redirect('/dashboard')
+                        self._redirect('/dashboard', {'session_id': session_id})
                     else:
                         self._send_html(dashboard.generate_register_page('用户名或邮箱已存在'))
                 
@@ -425,13 +423,12 @@ class MultiUserDashboard:
                         cookies[key] = value
                 return cookies.get(name)
             
-            def _set_cookie(self, name: str, value: str):
-                """设置Cookie"""
-                self.send_header('Set-Cookie', f'{name}={value}; Path=/; HttpOnly')
-            
-            def _send_html(self, html: str, status: int = 200):
+            def _send_html(self, html: str, status: int = 200, cookies: dict = None):
                 """发送HTML响应"""
                 self.send_response(status)
+                if cookies:
+                    for name, value in cookies.items():
+                        self.send_header('Set-Cookie', f'{name}={value}; Path=/; HttpOnly')
                 self.send_header('Content-type', 'text/html; charset=utf-8')
                 self.end_headers()
                 self.wfile.write(html.encode('utf-8'))
@@ -443,10 +440,13 @@ class MultiUserDashboard:
                 self.end_headers()
                 self.wfile.write(json.dumps(data, ensure_ascii=False).encode('utf-8'))
             
-            def _redirect(self, location: str):
+            def _redirect(self, location: str, cookies: dict = None):
                 """重定向"""
                 self.send_response(302)
                 self.send_header('Location', location)
+                if cookies:
+                    for name, value in cookies.items():
+                        self.send_header('Set-Cookie', f'{name}={value}; Path=/; HttpOnly')
                 self.end_headers()
             
             def log_message(self, format, *args):

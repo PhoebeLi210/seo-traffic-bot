@@ -1,5 +1,6 @@
 # Alibaba Cloud Linux 3 专用 Dockerfile
-FROM python:3.11-slim
+# 使用阿里云镜像
+FROM registry.cn-hangzhou.aliyuncs.com/python/python:3.11-slim
 
 # 设置工作目录
 WORKDIR /app
