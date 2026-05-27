@@ -1,0 +1,25 @@
+# Alibaba Cloud Linux 3 专用 Docker Compose
+version: '3.8'
+
+services:
+  seo-traffic-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile.alibaba
+    container_name: seo-traffic-bot
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./stats:/app/stats
+      - ./config:/app/config
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    networks:
+      - seo-network
+
+networks:
+  seo-network:
+    driver: bridge
