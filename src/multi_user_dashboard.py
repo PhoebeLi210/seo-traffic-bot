@@ -1,9 +1,10 @@
 """
-多用户Web仪表盘 - 支持用户登录和数据隔离
+多用户Web仪表盘 - 支持用户登录、网站管理、关键词设置和数据统计
 """
 
 import json
 import os
+import secrets
 from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import Dict, List, Any, Optional
@@ -13,27 +14,86 @@ import threading
 from loguru import logger
 
 from .user_manager import user_manager, User
-from .web_dashboard import StatsDashboard
 
 
 class MultiUserDashboard:
     """多用户仪表盘"""
-    
+
     def __init__(self, port: int = 8080):
         self.port = port
         self.server = None
         self.server_thread = None
         self.sessions: Dict[str, str] = {}  # session_id -> user_id
-    
-    def get_user_dashboard(self, user_id: str) -> StatsDashboard:
-        """获取用户的仪表盘实例"""
-        user_dir = user_manager.get_user_data_dir(user_id)
-        return StatsDashboard(stats_dir=str(user_dir / "stats"))
-    
+
+    def _get_user_websites_file(self, user_id: str) -> Path:
+        """获取用户网站配置文件路径"""
+        return user_manager.get_user_data_dir(user_id) / "config" / "websites.json"
+
+    def _load_user_websites(self, user_id: str) -> List[Dict]:
+        """加载用户的网站列表"""
+        f = self._get_user_websites_file(user_id)
+        if f.exists():
+            try:
+                with open(f, 'r', encoding='utf-8') as fp:
+                    return json.load(fp).get('websites', [])
+            except Exception:
+                return []
+        return []
+
+    def _save_user_websites(self, user_id: str, websites: List[Dict]):
+        """保存用户的网站列表"""
+        f = self._get_user_websites_file(user_id)
+        f.parent.mkdir(parents=True, exist_ok=True)
+        with open(f, 'w', encoding='utf-8') as fp:
+            json.dump({'websites': websites}, fp, ensure_ascii=False, indent=2)
+
+    def _get_user_stats_dir(self, user_id: str) -> Path:
+        """获取用户统计目录"""
+        return user_manager.get_user_data_dir(user_id) / "stats"
+
+    def _get_user_stats(self, user_id: str, days: int = 7) -> Dict[str, Any]:
+        """获取用户统计数据"""
+        stats_dir = self._get_user_stats_dir(user_id)
+        total_visits = 0
+        success_visits = 0
+        failed_visits = 0
+        website_summary = {}
+        daily_data = []
+
+        for i in range(days):
+            target_date = date.today() - timedelta(days=i)
+            stats_file = stats_dir / f"{target_date.isoformat()}.json"
+            if stats_file.exists():
+                try:
+                    with open(stats_file, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                        daily_data.append(data)
+                        total_visits += data.get("total_visits", 0)
+                        success_visits += data.get("successful_visits", 0)
+                        failed_visits += data.get("failed_visits", 0)
+                        for url, site_data in data.get("websites", {}).items():
+                            if url not in website_summary:
+                                website_summary[url] = {"visits": 0, "success": 0, "failed": 0}
+                            website_summary[url]["visits"] += site_data.get("total_visits", 0)
+                            website_summary[url]["success"] += site_data.get("successful_visits", 0)
+                            website_summary[url]["failed"] += site_data.get("failed_visits", 0)
+                except Exception:
+                    pass
+
+        return {
+            "total_visits": total_visits,
+            "success_visits": success_visits,
+            "failed_visits": failed_visits,
+            "success_rate": (success_visits / total_visits * 100) if total_visits > 0 else 0,
+            "website_summary": website_summary,
+            "daily_data": daily_data,
+            "days": days
+        }
+
+    # ==================== 页面生成 ====================
+
     def generate_login_page(self, error: str = None) -> str:
-        """生成登录页面"""
         error_html = f'<div class="error">{error}</div>' if error else ''
-        
         return f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -42,88 +102,31 @@ class MultiUserDashboard:
     <title>登录 - SEO Traffic Bot</title>
     <style>
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-        body {{
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }}
-        .login-box {{
-            background: white;
-            padding: 40px;
-            border-radius: 20px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-            width: 100%;
-            max-width: 400px;
-        }}
-        h1 {{
-            text-align: center;
-            color: #333;
-            margin-bottom: 30px;
-            font-size: 1.8em;
-        }}
-        .form-group {{
-            margin-bottom: 20px;
-        }}
-        label {{
-            display: block;
-            margin-bottom: 8px;
-            color: #555;
-            font-weight: 500;
-        }}
-        input {{
-            width: 100%;
-            padding: 12px 15px;
-            border: 2px solid #e0e0e0;
-            border-radius: 10px;
-            font-size: 1em;
-            transition: border-color 0.3s;
-        }}
-        input:focus {{
-            outline: none;
-            border-color: #667eea;
-        }}
-        button {{
-            width: 100%;
-            padding: 14px;
+            min-height: 100vh; display: flex; align-items: center; justify-content: center; }}
+        .box {{ background: white; padding: 40px; border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3); width: 100%; max-width: 400px; }}
+        h1 {{ text-align: center; color: #333; margin-bottom: 30px; font-size: 1.8em; }}
+        .form-group {{ margin-bottom: 20px; }}
+        label {{ display: block; margin-bottom: 8px; color: #555; font-weight: 500; }}
+        input {{ width: 100%; padding: 12px 15px; border: 2px solid #e0e0e0;
+            border-radius: 10px; font-size: 1em; transition: border-color 0.3s; }}
+        input:focus {{ outline: none; border-color: #667eea; }}
+        button {{ width: 100%; padding: 14px;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border: none;
-            border-radius: 10px;
-            font-size: 1em;
-            font-weight: 600;
-            cursor: pointer;
-            transition: transform 0.3s, box-shadow 0.3s;
-        }}
-        button:hover {{
-            transform: translateY(-2px);
-            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4);
-        }}
-        .error {{
-            background: #fee;
-            color: #c33;
-            padding: 12px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            text-align: center;
-        }}
-        .links {{
-            text-align: center;
-            margin-top: 20px;
-        }}
-        .links a {{
-            color: #667eea;
-            text-decoration: none;
-        }}
-        .links a:hover {{
-            text-decoration: underline;
-        }}
+            color: white; border: none; border-radius: 10px; font-size: 1em;
+            font-weight: 600; cursor: pointer; transition: transform 0.3s, box-shadow 0.3s; }}
+        button:hover {{ transform: translateY(-2px); box-shadow: 0 10px 30px rgba(102,126,234,0.4); }}
+        .error {{ background: #fee; color: #c33; padding: 12px; border-radius: 8px;
+            margin-bottom: 20px; text-align: center; }}
+        .links {{ text-align: center; margin-top: 20px; }}
+        .links a {{ color: #667eea; text-decoration: none; }}
+        .links a:hover {{ text-decoration: underline; }}
     </style>
 </head>
 <body>
-    <div class="login-box">
+    <div class="box">
         <h1>🔐 用户登录</h1>
         {error_html}
         <form method="POST" action="/login">
@@ -143,11 +146,9 @@ class MultiUserDashboard:
     </div>
 </body>
 </html>"""
-    
+
     def generate_register_page(self, error: str = None) -> str:
-        """生成注册页面"""
         error_html = f'<div class="error">{error}</div>' if error else ''
-        
         return f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -156,114 +157,36 @@ class MultiUserDashboard:
     <title>注册 - SEO Traffic Bot</title>
     <style>
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-        body {{
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }}
-        .register-box {{
-            background: white;
-            padding: 40px;
-            border-radius: 20px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-            width: 100%;
-            max-width: 400px;
-        }}
-        h1 {{
-            text-align: center;
-            color: #333;
-            margin-bottom: 30px;
-            font-size: 1.8em;
-        }}
-        .form-group {{
-            margin-bottom: 20px;
-        }}
-        label {{
-            display: block;
-            margin-bottom: 8px;
-            color: #555;
-            font-weight: 500;
-        }}
-        input {{
-            width: 100%;
-            padding: 12px 15px;
-            border: 2px solid #e0e0e0;
-            border-radius: 10px;
-            font-size: 1em;
-            transition: border-color 0.3s;
-        }}
-        input:focus {{
-            outline: none;
-            border-color: #667eea;
-        }}
-        button {{
-            width: 100%;
-            padding: 14px;
+            min-height: 100vh; display: flex; align-items: center; justify-content: center; }}
+        .box {{ background: white; padding: 40px; border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3); width: 100%; max-width: 400px; }}
+        h1 {{ text-align: center; color: #333; margin-bottom: 30px; font-size: 1.8em; }}
+        .form-group {{ margin-bottom: 20px; }}
+        label {{ display: block; margin-bottom: 8px; color: #555; font-weight: 500; }}
+        input {{ width: 100%; padding: 12px 15px; border: 2px solid #e0e0e0;
+            border-radius: 10px; font-size: 1em; transition: border-color 0.3s; }}
+        input:focus {{ outline: none; border-color: #667eea; }}
+        button {{ width: 100%; padding: 14px;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border: none;
-            border-radius: 10px;
-            font-size: 1em;
-            font-weight: 600;
-            cursor: pointer;
-            transition: transform 0.3s, box-shadow 0.3s;
-        }}
-        button:hover {{
-            transform: translateY(-2px);
-            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4);
-        }}
-        .error {{
-            background: #fee;
-            color: #c33;
-            padding: 12px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            text-align: center;
-        }}
-        .links {{
-            text-align: center;
-            margin-top: 20px;
-        }}
-        .links a {{
-            color: #667eea;
-            text-decoration: none;
-        }}
-        .links a:hover {{
-            text-decoration: underline;
-        }}
-        .plan-info {{
-            background: #f0f4ff;
-            padding: 15px;
-            border-radius: 10px;
-            margin-bottom: 20px;
-        }}
-        .plan-info h3 {{
-            color: #667eea;
-            margin-bottom: 10px;
-        }}
-        .plan-info ul {{
-            list-style: none;
-            color: #555;
-        }}
-        .plan-info li {{
-            padding: 5px 0;
-            padding-left: 20px;
-            position: relative;
-        }}
-        .plan-info li:before {{
-            content: "✓";
-            position: absolute;
-            left: 0;
-            color: #10b981;
-            font-weight: bold;
-        }}
+            color: white; border: none; border-radius: 10px; font-size: 1em;
+            font-weight: 600; cursor: pointer; transition: transform 0.3s, box-shadow 0.3s; }}
+        button:hover {{ transform: translateY(-2px); box-shadow: 0 10px 30px rgba(102,126,234,0.4); }}
+        .error {{ background: #fee; color: #c33; padding: 12px; border-radius: 8px;
+            margin-bottom: 20px; text-align: center; }}
+        .links {{ text-align: center; margin-top: 20px; }}
+        .links a {{ color: #667eea; text-decoration: none; }}
+        .links a:hover {{ text-decoration: underline; }}
+        .plan-info {{ background: #f0f4ff; padding: 15px; border-radius: 10px; margin-bottom: 20px; }}
+        .plan-info h3 {{ color: #667eea; margin-bottom: 10px; }}
+        .plan-info ul {{ list-style: none; color: #555; }}
+        .plan-info li {{ padding: 5px 0; padding-left: 20px; position: relative; }}
+        .plan-info li:before {{ content: "✓"; position: absolute; left: 0; color: #10b981; font-weight: bold; }}
     </style>
 </head>
 <body>
-    <div class="register-box">
+    <div class="box">
         <h1>📝 用户注册</h1>
         <div class="plan-info">
             <h3>免费版包含：</h3>
@@ -300,57 +223,518 @@ class MultiUserDashboard:
     </div>
 </body>
 </html>"""
-    
+
+    def generate_dashboard_page(self, user_id: str, active_tab: str = "websites") -> str:
+        """生成主仪表盘页面 - 包含网站管理、关键词设置、统计查看"""
+        user = user_manager.get_user_by_id(user_id)
+        if not user:
+            return self.generate_login_page("请先登录")
+
+        websites = self._load_user_websites(user_id)
+        stats = self._get_user_stats(user_id, days=7)
+
+        # 生成网站列表行
+        website_rows = ""
+        for i, ws in enumerate(websites):
+            url = ws.get("url", "")
+            keywords = ws.get("keywords", [])
+            daily_visits = ws.get("daily_visits", 10)
+            enabled = ws.get("enabled", True)
+            status_badge = '<span class="badge badge-success">运行中</span>' if enabled else '<span class="badge badge-gray">已暂停</span>'
+            kw_text = ", ".join(keywords[:3]) + (f" (+{len(keywords)-3})" if len(keywords) > 3 else "") if keywords else '<span class="text-muted">未设置</span>'
+            website_rows += f"""
+            <tr data-index="{i}">
+                <td><a href="{url}" target="_blank" class="url-link">{url[:45]}{'...' if len(url)>45 else ''}</a></td>
+                <td>{kw_text}</td>
+                <td class="center">{daily_visits}</td>
+                <td class="center">{status_badge}</td>
+                <td class="center">
+                    <button class="btn btn-sm btn-primary" onclick="editSite({i})">编辑</button>
+                    <button class="btn btn-sm btn-danger" onclick="deleteSite({i})">删除</button>
+                </td>
+            </tr>"""
+
+        if not website_rows:
+            website_rows = """<tr><td colspan="5" class="empty-state">
+                <div class="empty-icon">🌐</div>
+                <p>还没有添加网站</p>
+                <p class="text-muted">点击上方"添加网站"按钮开始</p>
+            </td></tr>"""
+
+        # 生成统计行
+        stats_rows = ""
+        for url, data in sorted(stats["website_summary"].items(), key=lambda x: x[1]["visits"], reverse=True):
+            rate = (data["success"] / data["visits"] * 100) if data["visits"] > 0 else 0
+            stats_rows += f"""
+            <tr>
+                <td class="url-cell">{url[:50]}{'...' if len(url)>50 else ''}</td>
+                <td class="center">{data['visits']}</td>
+                <td class="center text-success">{data['success']}</td>
+                <td class="center text-danger">{data['failed']}</td>
+                <td class="center">{rate:.1f}%</td>
+            </tr>"""
+        if not stats_rows:
+            stats_rows = """<tr><td colspan="5" class="empty-state">
+                <div class="empty-icon">📊</div>
+                <p>暂无统计数据</p>
+                <p class="text-muted">添加网站并运行后，这里会显示访问数据</p>
+            </td></tr>"""
+
+        # 准备网站数据给JS
+        websites_json = json.dumps(websites, ensure_ascii=False)
+
+        return f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SEO Traffic Bot - 控制面板</title>
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f0f2f5; min-height: 100vh; }}
+
+        /* 顶部导航 */
+        .navbar {{ background: white; box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            padding: 0 30px; display: flex; align-items: center; height: 60px;
+            position: sticky; top: 0; z-index: 100; }}
+        .navbar .logo {{ font-size: 1.3em; font-weight: 700; color: #667eea; margin-right: 40px; }}
+        .navbar .nav-tabs {{ display: flex; gap: 5px; }}
+        .navbar .nav-tab {{ padding: 10px 20px; border-radius: 8px; cursor: pointer;
+            color: #666; font-weight: 500; transition: all 0.2s; border: none; background: none; font-size: 0.95em; }}
+        .navbar .nav-tab:hover {{ background: #f0f2f5; color: #333; }}
+        .navbar .nav-tab.active {{ background: #667eea; color: white; }}
+        .navbar .user-info {{ margin-left: auto; display: flex; align-items: center; gap: 12px; }}
+        .navbar .user-name {{ font-weight: 600; color: #333; }}
+        .navbar .plan-badge {{ background: #667eea; color: white; padding: 3px 10px;
+            border-radius: 12px; font-size: 0.75em; }}
+        .navbar .logout-btn {{ color: #ef4444; text-decoration: none; font-size: 0.9em; cursor: pointer;
+            background: none; border: none; }}
+        .navbar .logout-btn:hover {{ text-decoration: underline; }}
+
+        /* 主内容 */
+        .main {{ max-width: 1100px; margin: 0 auto; padding: 25px 20px; }}
+
+        /* 统计卡片 */
+        .stats-row {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 25px; }}
+        .stat-card {{ background: white; border-radius: 12px; padding: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06); }}
+        .stat-card .label {{ font-size: 0.85em; color: #888; margin-bottom: 8px; }}
+        .stat-card .value {{ font-size: 1.8em; font-weight: 700; color: #333; }}
+        .stat-card .value.green {{ color: #10b981; }}
+        .stat-card .value.red {{ color: #ef4444; }}
+        .stat-card .value.blue {{ color: #667eea; }}
+
+        /* 操作栏 */
+        .action-bar {{ display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 16px; }}
+        .action-bar h2 {{ font-size: 1.2em; color: #333; }}
+        .action-bar .hint {{ font-size: 0.85em; color: #888; }}
+
+        /* 按钮 */
+        .btn {{ padding: 8px 18px; border-radius: 8px; border: none; cursor: pointer;
+            font-size: 0.9em; font-weight: 500; transition: all 0.2s; }}
+        .btn-primary {{ background: #667eea; color: white; }}
+        .btn-primary:hover {{ background: #5a67d8; }}
+        .btn-success {{ background: #10b981; color: white; }}
+        .btn-success:hover {{ background: #059669; }}
+        .btn-danger {{ background: #ef4444; color: white; }}
+        .btn-danger:hover {{ background: #dc2626; }}
+        .btn-sm {{ padding: 5px 12px; font-size: 0.8em; }}
+        .btn-gray {{ background: #e5e7eb; color: #555; }}
+        .btn-gray:hover {{ background: #d1d5db; }}
+
+        /* 表格 */
+        .card {{ background: white; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+            overflow: hidden; }}
+        .card table {{ width: 100%; border-collapse: collapse; }}
+        .card th {{ background: #f8fafc; padding: 12px 16px; text-align: left;
+            font-weight: 600; color: #475569; font-size: 0.85em; text-transform: uppercase;
+            letter-spacing: 0.5px; border-bottom: 1px solid #e2e8f0; }}
+        .card td {{ padding: 12px 16px; border-bottom: 1px solid #f1f5f9; font-size: 0.9em; color: #333; }}
+        .card tr:hover {{ background: #f8fafc; }}
+        .center {{ text-align: center; }}
+        .url-link {{ color: #667eea; text-decoration: none; }}
+        .url-link:hover {{ text-decoration: underline; }}
+        .url-cell {{ max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+        .text-muted {{ color: #aaa; }}
+        .text-success {{ color: #10b981; }}
+        .text-danger {{ color: #ef4444; }}
+
+        /* 徽章 */
+        .badge {{ display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 0.75em; font-weight: 600; }}
+        .badge-success {{ background: #d1fae5; color: #065f46; }}
+        .badge-gray {{ background: #f1f5f9; color: #64748b; }}
+
+        /* 空状态 */
+        .empty-state {{ text-align: center; padding: 40px 20px !important; }}
+        .empty-icon {{ font-size: 2.5em; margin-bottom: 10px; }}
+        .empty-state p {{ color: #666; margin-bottom: 5px; }}
+
+        /* 模态框 */
+        .modal-overlay {{ display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.5); z-index: 200; align-items: center; justify-content: center; }}
+        .modal-overlay.show {{ display: flex; }}
+        .modal {{ background: white; border-radius: 16px; padding: 30px; width: 90%; max-width: 520px;
+            max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.3); }}
+        .modal h2 {{ margin-bottom: 20px; color: #333; font-size: 1.3em; }}
+        .modal .form-group {{ margin-bottom: 16px; }}
+        .modal label {{ display: block; margin-bottom: 6px; color: #555; font-weight: 500; font-size: 0.9em; }}
+        .modal input[type="text"], .modal input[type="url"], .modal input[type="number"] {{
+            width: 100%; padding: 10px 14px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 0.95em; }}
+        .modal input:focus {{ outline: none; border-color: #667eea; }}
+        .modal .hint {{ font-size: 0.8em; color: #999; margin-top: 4px; }}
+        .modal .btn-row {{ display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }}
+        .modal .keywords-area {{ display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }}
+        .modal .keyword-tag {{ background: #eef2ff; color: #667eea; padding: 4px 10px;
+            border-radius: 6px; font-size: 0.85em; display: flex; align-items: center; gap: 6px; }}
+        .modal .keyword-tag .remove {{ cursor: pointer; color: #aaa; font-weight: bold; }}
+        .modal .keyword-tag .remove:hover {{ color: #ef4444; }}
+        .modal .kw-input-row {{ display: flex; gap: 8px; margin-top: 8px; }}
+        .modal .kw-input-row input {{ flex: 1; }}
+        .modal .kw-input-row button {{ white-space: nowrap; }}
+        .modal .toggle-row {{ display: flex; align-items: center; gap: 10px; }}
+        .modal .toggle {{ width: 44px; height: 24px; border-radius: 12px; background: #ddd;
+            position: relative; cursor: pointer; transition: background 0.3s; }}
+        .modal .toggle.on {{ background: #667eea; }}
+        .modal .toggle::after {{ content: ''; position: absolute; top: 2px; left: 2px;
+            width: 20px; height: 20px; border-radius: 50%; background: white;
+            transition: transform 0.3s; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }}
+        .modal .toggle.on::after {{ transform: translateX(20px); }}
+
+        /* Tab内容切换 */
+        .tab-content {{ display: none; }}
+        .tab-content.active {{ display: block; }}
+
+        /* 响应式 */
+        @media (max-width: 768px) {{
+            .stats-row {{ grid-template-columns: repeat(2, 1fr); }}
+            .navbar {{ padding: 0 15px; }}
+            .navbar .nav-tabs {{ gap: 2px; }}
+            .navbar .nav-tab {{ padding: 8px 12px; font-size: 0.85em; }}
+            .action-bar {{ flex-direction: column; gap: 10px; align-items: flex-start; }}
+        }}
+    </style>
+</head>
+<body>
+
+<!-- 导航栏 -->
+<nav class="navbar">
+    <div class="logo">🚀 SEO Traffic Bot</div>
+    <div class="nav-tabs">
+        <button class="nav-tab active" onclick="switchTab('websites')">🌐 网站管理</button>
+        <button class="nav-tab" onclick="switchTab('stats')">📊 统计数据</button>
+    </div>
+    <div class="user-info">
+        <span class="user-name">👤 {user.username}</span>
+        <span class="plan-badge">{user.plan.upper()}</span>
+        <button class="logout-btn" onclick="location.href='/logout'">退出</button>
+    </div>
+</nav>
+
+<!-- 主内容 -->
+<div class="main">
+
+    <!-- 概览统计 -->
+    <div class="stats-row">
+        <div class="stat-card">
+            <div class="label">网站数量</div>
+            <div class="value blue">{len(websites)}</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">总访问次数 (7天)</div>
+            <div class="value">{stats['total_visits']}</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">成功访问</div>
+            <div class="value green">{stats['success_visits']}</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">成功率</div>
+            <div class="value">{stats['success_rate']:.1f}%</div>
+        </div>
+    </div>
+
+    <!-- 网站管理 Tab -->
+    <div id="tab-websites" class="tab-content active">
+        <div class="action-bar">
+            <div>
+                <h2>网站管理</h2>
+                <span class="hint">已使用 {len(websites)}/{user.max_websites} 个网站名额</span>
+            </div>
+            <button class="btn btn-primary" onclick="openAddModal()">＋ 添加网站</button>
+        </div>
+        <div class="card">
+            <table>
+                <thead>
+                    <tr>
+                        <th>网站地址</th>
+                        <th>搜索关键词</th>
+                        <th class="center">每日访问</th>
+                        <th class="center">状态</th>
+                        <th class="center">操作</th>
+                    </tr>
+                </thead>
+                <tbody id="website-tbody">
+                    {website_rows}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- 统计数据 Tab -->
+    <div id="tab-stats" class="tab-content">
+        <div class="action-bar">
+            <div>
+                <h2>访问统计 (最近7天)</h2>
+                <span class="hint">数据每日自动更新</span>
+            </div>
+        </div>
+        <div class="card">
+            <table>
+                <thead>
+                    <tr>
+                        <th>网站</th>
+                        <th class="center">总访问</th>
+                        <th class="center">成功</th>
+                        <th class="center">失败</th>
+                        <th class="center">成功率</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {stats_rows}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+
+<!-- 添加/编辑网站 模态框 -->
+<div class="modal-overlay" id="siteModal">
+    <div class="modal">
+        <h2 id="modalTitle">添加网站</h2>
+        <form id="siteForm" onsubmit="saveSite(event)">
+            <input type="hidden" id="editIndex" value="-1">
+            <div class="form-group">
+                <label>网站地址</label>
+                <input type="url" id="siteUrl" required placeholder="https://example.com">
+                <div class="hint">输入完整的网站URL，包含 https://</div>
+            </div>
+            <div class="form-group">
+                <label>搜索关键词</label>
+                <div class="hint" style="margin-bottom:6px;">设置搜索引擎用来找到你网站的关键词，每行一个或用逗号分隔</div>
+                <div class="keywords-area" id="keywordsArea"></div>
+                <div class="kw-input-row">
+                    <input type="text" id="kwInput" placeholder="输入关键词后按回车或点击添加">
+                    <button type="button" class="btn btn-gray" onclick="addKeyword()">添加</button>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>每日访问次数</label>
+                <input type="number" id="dailyVisits" min="1" max="100" value="10">
+                <div class="hint">免费版每个网站每天最多 {user.max_daily_visits} 次</div>
+            </div>
+            <div class="form-group">
+                <div class="toggle-row">
+                    <div class="toggle on" id="enabledToggle" onclick="toggleEnabled()"></div>
+                    <label style="margin:0;">启用此网站</label>
+                </div>
+            </div>
+            <div class="btn-row">
+                <button type="button" class="btn btn-gray" onclick="closeModal()">取消</button>
+                <button type="submit" class="btn btn-primary">保存</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+// 网站数据
+let websites = {websites_json};
+let currentKeywords = [];
+
+// Tab切换
+function switchTab(tab) {{
+    document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+    document.getElementById('tab-' + tab).classList.add('active');
+    event.target.classList.add('active');
+}}
+
+// 打开添加模态框
+function openAddModal() {{
+    if (websites.length >= {user.max_websites}) {{
+        alert('已达到最大网站数量限制 ({user.max_websites}个)');
+        return;
+    }}
+    document.getElementById('modalTitle').textContent = '添加网站';
+    document.getElementById('editIndex').value = -1;
+    document.getElementById('siteUrl').value = '';
+    document.getElementById('dailyVisits').value = 10;
+    currentKeywords = [];
+    renderKeywords();
+    setToggle(true);
+    document.getElementById('siteModal').classList.add('show');
+}}
+
+// 编辑网站
+function editSite(index) {{
+    const site = websites[index];
+    document.getElementById('modalTitle').textContent = '编辑网站';
+    document.getElementById('editIndex').value = index;
+    document.getElementById('siteUrl').value = site.url || '';
+    document.getElementById('dailyVisits').value = site.daily_visits || 10;
+    currentKeywords = site.keywords ? [...site.keywords] : [];
+    renderKeywords();
+    setToggle(site.enabled !== false);
+    document.getElementById('siteModal').classList.add('show');
+}}
+
+// 删除网站
+function deleteSite(index) {{
+    if (!confirm('确定要删除这个网站吗？')) return;
+    websites.splice(index, 1);
+    saveToServer();
+}}
+
+// 关闭模态框
+function closeModal() {{
+    document.getElementById('siteModal').classList.remove('show');
+}}
+
+// 关键词管理
+function addKeyword() {{
+    const input = document.getElementById('kwInput');
+    const kw = input.value.trim();
+    if (kw && !currentKeywords.includes(kw)) {{
+        currentKeywords.push(kw);
+        renderKeywords();
+    }}
+    input.value = '';
+    input.focus();
+}}
+
+function removeKeyword(idx) {{
+    currentKeywords.splice(idx, 1);
+    renderKeywords();
+}}
+
+function renderKeywords() {{
+    const area = document.getElementById('keywordsArea');
+    area.innerHTML = currentKeywords.map((kw, i) =>
+        `<span class="keyword-tag">${{kw}} <span class="remove" onclick="removeKeyword(${{i}})">×</span></span>`
+    ).join('');
+}}
+
+// 回车添加关键词
+document.addEventListener('DOMContentLoaded', function() {{
+    document.getElementById('kwInput').addEventListener('keydown', function(e) {{
+        if (e.key === 'Enter') {{ e.preventDefault(); addKeyword(); }}
+    }});
+}});
+
+// Toggle开关
+function toggleEnabled() {{
+    const toggle = document.getElementById('enabledToggle');
+    toggle.classList.toggle('on');
+}}
+function setToggle(on) {{
+    const toggle = document.getElementById('enabledToggle');
+    if (on) toggle.classList.add('on');
+    else toggle.classList.remove('on');
+}}
+
+// 保存网站
+function saveSite(e) {{
+    e.preventDefault();
+    const index = parseInt(document.getElementById('editIndex').value);
+    const site = {{
+        url: document.getElementById('siteUrl').value.trim(),
+        keywords: [...currentKeywords],
+        daily_visits: parseInt(document.getElementById('dailyVisits').value) || 10,
+        enabled: document.getElementById('enabledToggle').classList.contains('on'),
+        search_engine: 'google'
+    }};
+
+    if (index >= 0) {{
+        websites[index] = site;
+    }} else {{
+        websites.push(site);
+    }}
+
+    saveToServer();
+    closeModal();
+}}
+
+// 保存到服务器
+function saveToServer() {{
+    fetch('/api/websites', {{
+        method: 'POST',
+        headers: {{'Content-Type': 'application/json'}},
+        body: JSON.stringify({{websites: websites}})
+    }}).then(r => r.json()).then(data => {{
+        if (data.success) {{
+            location.reload();
+        }} else {{
+            alert('保存失败: ' + (data.error || '未知错误'));
+        }}
+    }}).catch(err => alert('网络错误: ' + err));
+}}
+</script>
+
+</body>
+</html>"""
+
+    # ==================== 服务器 ====================
+
     def start_server(self):
         """启动Web服务器"""
         dashboard = self
-        
+
         class MultiUserHandler(BaseHTTPRequestHandler):
             def do_GET(self):
                 parsed_path = urlparse(self.path)
                 path = parsed_path.path
-                
-                # 检查登录状态
+
                 session_id = self._get_cookie('session_id')
                 user_id = dashboard.sessions.get(session_id) if session_id else None
-                
+
                 if path == '/login':
                     self._send_html(dashboard.generate_login_page())
-                
+
                 elif path == '/register':
                     self._send_html(dashboard.generate_register_page())
-                
+
                 elif path == '/logout':
-                    if session_id in dashboard.sessions:
+                    if session_id and session_id in dashboard.sessions:
                         del dashboard.sessions[session_id]
                     self._redirect('/login')
-                
+
                 elif path == '/' or path == '/dashboard':
                     if not user_id:
                         self._redirect('/login')
                         return
-                    
-                    # 显示用户仪表盘
-                    user_dashboard = dashboard.get_user_dashboard(user_id)
-                    html = user_dashboard.generate_html_report()
-                    # 添加用户菜单
-                    html = dashboard._add_user_menu(html, user_id)
-                    self._send_html(html)
-                
+                    self._send_html(dashboard.generate_dashboard_page(user_id))
+
                 elif path == '/api/stats':
                     if not user_id:
                         self._send_json({'error': '未登录'}, 401)
                         return
-                    
-                    user_dashboard = dashboard.get_user_dashboard(user_id)
-                    stats = user_dashboard.get_website_stats()
+                    stats = dashboard._get_user_stats(user_id)
                     self._send_json(stats)
-                
+
+                elif path == '/api/websites':
+                    if not user_id:
+                        self._send_json({'error': '未登录'}, 401)
+                        return
+                    websites = dashboard._load_user_websites(user_id)
+                    self._send_json({'websites': websites})
+
                 elif path == '/api/user':
                     if not user_id:
                         self._send_json({'error': '未登录'}, 401)
                         return
-                    
                     user = user_manager.get_user_by_id(user_id)
                     if user:
                         self._send_json({
@@ -363,22 +747,31 @@ class MultiUserDashboard:
                         })
                     else:
                         self._send_json({'error': '用户不存在'}, 404)
-                
+
                 else:
                     self._send_html('<h1>404 - 页面不存在</h1>', 404)
-            
+
             def do_POST(self):
                 parsed_path = urlparse(self.path)
                 path = parsed_path.path
-                
+
                 content_length = int(self.headers.get('Content-Length', 0))
                 post_data = self.rfile.read(content_length).decode('utf-8')
-                params = parse_qs(post_data)
-                
+
+                # 判断是否为JSON
+                try:
+                    params = json.loads(post_data)
+                except (json.JSONDecodeError, ValueError):
+                    params = parse_qs(post_data)
+
                 if path == '/login':
-                    username = params.get('username', [''])[0]
-                    password = params.get('password', [''])[0]
-                    
+                    if isinstance(params, dict) and 'username' in params:
+                        username = params['username'] if isinstance(params['username'], str) else params.get('username', [''])[0]
+                        password = params['password'] if isinstance(params['password'], str) else params.get('password', [''])[0]
+                    else:
+                        username = params.get('username', [''])[0]
+                        password = params.get('password', [''])[0]
+
                     user = user_manager.login(username, password)
                     if user:
                         session_id = secrets.token_hex(16)
@@ -386,22 +779,28 @@ class MultiUserDashboard:
                         self._redirect('/dashboard', {'session_id': session_id})
                     else:
                         self._send_html(dashboard.generate_login_page('用户名或密码错误'))
-                
+
                 elif path == '/register':
-                    username = params.get('username', [''])[0]
-                    email = params.get('email', [''])[0]
-                    password = params.get('password', [''])[0]
-                    password_confirm = params.get('password_confirm', [''])[0]
-                    
-                    # 验证
+                    if isinstance(params, dict) and 'username' in params:
+                        username = params['username'] if isinstance(params['username'], str) else params.get('username', [''])[0]
+                        email = params['email'] if isinstance(params['email'], str) else params.get('email', [''])[0]
+                        password = params['password'] if isinstance(params['password'], str) else params.get('password', [''])[0]
+                        password_confirm = params.get('password_confirm', '')
+                        if isinstance(password_confirm, list):
+                            password_confirm = password_confirm[0]
+                    else:
+                        username = params.get('username', [''])[0]
+                        email = params.get('email', [''])[0]
+                        password = params.get('password', [''])[0]
+                        password_confirm = params.get('password_confirm', [''])[0]
+
                     if password != password_confirm:
                         self._send_html(dashboard.generate_register_page('两次输入的密码不一致'))
                         return
-                    
                     if len(password) < 6:
                         self._send_html(dashboard.generate_register_page('密码长度至少6位'))
                         return
-                    
+
                     user = user_manager.register(username, email, password)
                     if user:
                         session_id = secrets.token_hex(16)
@@ -409,12 +808,39 @@ class MultiUserDashboard:
                         self._redirect('/dashboard', {'session_id': session_id})
                     else:
                         self._send_html(dashboard.generate_register_page('用户名或邮箱已存在'))
-                
+
+                elif path == '/api/websites':
+                    # JSON API: 保存网站列表
+                    if not self._check_login():
+                        self._send_json({'error': '未登录'}, 401)
+                        return
+                    session_id = self._get_cookie('session_id')
+                    user_id = dashboard.sessions.get(session_id)
+                    if not user_id:
+                        self._send_json({'error': '未登录'}, 401)
+                        return
+
+                    try:
+                        data = json.loads(post_data) if not isinstance(params, dict) or 'websites' not in str(params) else params
+                        if isinstance(data, dict) and 'websites' in data:
+                            websites = data['websites']
+                        else:
+                            websites = data if isinstance(data, list) else []
+                    except Exception:
+                        self._send_json({'error': '无效的数据格式'}, 400)
+                        return
+
+                    dashboard._save_user_websites(user_id, websites)
+                    self._send_json({'success': True, 'message': '保存成功'})
+
                 else:
                     self._send_html('<h1>404 - 页面不存在</h1>', 404)
-            
+
+            def _check_login(self) -> bool:
+                session_id = self._get_cookie('session_id')
+                return session_id and session_id in dashboard.sessions
+
             def _get_cookie(self, name: str) -> Optional[str]:
-                """获取Cookie"""
                 cookie_header = self.headers.get('Cookie', '')
                 cookies = {}
                 for cookie in cookie_header.split(';'):
@@ -422,9 +848,8 @@ class MultiUserDashboard:
                         key, value = cookie.strip().split('=', 1)
                         cookies[key] = value
                 return cookies.get(name)
-            
+
             def _send_html(self, html: str, status: int = 200, cookies: dict = None):
-                """发送HTML响应"""
                 self.send_response(status)
                 if cookies:
                     for name, value in cookies.items():
@@ -432,57 +857,32 @@ class MultiUserDashboard:
                 self.send_header('Content-type', 'text/html; charset=utf-8')
                 self.end_headers()
                 self.wfile.write(html.encode('utf-8'))
-            
+
             def _send_json(self, data: dict, status: int = 200):
-                """发送JSON响应"""
                 self.send_response(status)
-                self.send_header('Content-type', 'application/json')
+                self.send_header('Content-type', 'application/json; charset=utf-8')
                 self.end_headers()
                 self.wfile.write(json.dumps(data, ensure_ascii=False).encode('utf-8'))
-            
+
             def _redirect(self, location: str, cookies: dict = None):
-                """重定向"""
                 self.send_response(302)
                 self.send_header('Location', location)
                 if cookies:
                     for name, value in cookies.items():
                         self.send_header('Set-Cookie', f'{name}={value}; Path=/; HttpOnly')
                 self.end_headers()
-            
+
             def log_message(self, format, *args):
                 logger.info(f"Dashboard: {args[0]}")
-        
-        import secrets
+
         self.server = HTTPServer(('0.0.0.0', self.port), MultiUserHandler)
-        
+
         self.server_thread = threading.Thread(target=self.server.serve_forever)
         self.server_thread.daemon = True
         self.server_thread.start()
-        
+
         logger.info(f"📊 多用户仪表盘已启动: http://0.0.0.0:{self.port}")
-    
-    def _add_user_menu(self, html: str, user_id: str) -> str:
-        """在HTML中添加用户菜单"""
-        user = user_manager.get_user_by_id(user_id)
-        if not user:
-            return html
-        
-        menu_html = f"""
-        <div style="position: fixed; top: 20px; right: 20px; z-index: 1000;">
-            <div style="background: white; padding: 15px 20px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
-                <span style="font-weight: 600; color: #333;">👤 {user.username}</span>
-                <span style="background: #667eea; color: white; padding: 3px 10px; border-radius: 15px; font-size: 0.8em; margin-left: 10px;">{user.plan}</span>
-                <br>
-                <small style="color: #666;">API Key: {user.api_key[:20]}...</small>
-                <br>
-                <a href="/logout" style="color: #ef4444; text-decoration: none; font-size: 0.9em;">退出登录</a>
-            </div>
-        </div>
-        """
-        
-        # 在<body>后插入菜单
-        return html.replace('<body>', f'<body>{menu_html}')
-    
+
     def stop_server(self):
         """停止服务器"""
         if self.server:
