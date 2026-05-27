@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  # 代理池服务 (可选)
+  proxypool:
+    image: germey/proxypool:latest
+    container_name: proxypool
+    ports:
+      - "5010:5010"
+    environment:
+      - PROXYPOOL_REDIS_HOST=redis
+      - PROXYPOOL_REDIS_PORT=6379
+      - PROXYPOOL_REDIS_PASSWORD=
+      - PROXYPOOL_REDIS_DB=0
+    depends_on:
+      - redis
+    networks:
+      - seo-network
+    restart: unless-stopped
+
+  # Redis服务
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - seo-network
+    restart: unless-stopped
+
+  # SEO流量机器人服务
+  traffic-bot:
+    build: .
+    container_name: seo-traffic-bot
+    volumes:
+      - ./config:/app/config
+      - ./logs:/app/logs
+      - ./stats:/app/stats
+    environment:
+      - PROXY_API_URL=http://proxypool:5010/get
+      - PROXY_POOL_ENABLED=true
+      - HEADLESS=true
+      - LOG_LEVEL=INFO
+    depends_on:
+      - proxypool
+      - redis
+    networks:
+      - seo-network
+    restart: unless-stopped
+    # 使用持续运行模式
+    command: python main.py --continuous
+
+networks:
+  seo-network:
+    driver: bridge
+
+volumes:
+  redis-data:

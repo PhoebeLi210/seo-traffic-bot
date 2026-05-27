@@ -1,0 +1,60 @@
+{
+  "websites": [
+    {
+      "url": "https://www.example1.com",
+      "name": "网站1",
+      "enabled": true,
+      "keywords": ["关键词1", "关键词2"],
+      "max_daily_visits": 15
+    },
+    {
+      "url": "https://www.example2.com",
+      "name": "网站2",
+      "enabled": true,
+      "keywords": ["关键词3", "关键词4"],
+      "max_daily_visits": 15
+    },
+    {
+      "url": "https://www.example3.com",
+      "name": "网站3",
+      "enabled": true,
+      "keywords": [],
+      "max_daily_visits": 10
+    },
+    {
+      "url": "https://www.example4.com",
+      "name": "网站4",
+      "enabled": true,
+      "keywords": [],
+      "max_daily_visits": 10
+    },
+    {
+      "url": "https://www.example5.com",
+      "name": "网站5",
+      "enabled": true,
+      "keywords": [],
+      "max_daily_visits": 10
+    },
+    {
+      "url": "https://www.example6.com",
+      "name": "网站6",
+      "enabled": true,
+      "keywords": [],
+      "max_daily_visits": 10
+    },
+    {
+      "url": "https://www.example7.com",
+      "name": "网站7",
+      "enabled": true,
+      "keywords": [],
+      "max_daily_visits": 10
+    },
+    {
+      "url": "https://www.example8.com",
+      "name": "网站8",
+      "enabled": true,
+      "keywords": [],
+      "max_daily_visits": 10
+    }
+  ]
+}

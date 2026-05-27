@@ -1,0 +1,70 @@
+# SEO Traffic Bot 配置文件
+
+# 浏览器设置
+browser:
+  headless: true
+  timeout: 30000
+  viewport:
+    min_width: 1200
+    max_width: 1920
+    min_height: 700
+    max_height: 1080
+  user_agents:
+    - "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.0"
+    - "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.0"
+    - "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0"
+
+# 行为模拟设置
+behavior:
+  # 页面停留时间（秒）
+  min_stay_duration: 10
+  max_stay_duration: 30
+  
+  # 访问间隔（秒）
+  min_visit_interval: 120
+  max_visit_interval: 300
+  
+  # 滚动设置
+  scroll:
+    enabled: true
+    min_scrolls: 2
+    max_scrolls: 5
+    min_scroll_distance: 300
+    max_scroll_distance: 1500
+  
+  # 鼠标移动设置
+  mouse_move:
+    enabled: true
+    min_moves: 3
+    max_moves: 8
+  
+  # 点击设置
+  click:
+    enabled: true
+    click_probability: 0.4
+    max_clicks_per_page: 2
+
+# 代理设置
+proxy:
+  enabled: true
+  api_url: "http://127.0.0.1:5010/get"
+  fallback_to_direct: true
+  test_url: "http://httpbin.org/ip"
+  timeout: 10
+
+# 调度设置
+scheduler:
+  enabled: true
+  # 运行时间段（24小时制）
+  active_hours:
+    start: 8
+    end: 23
+  # 周末是否运行
+  run_on_weekends: true
+
+# 监控设置
+monitoring:
+  enabled: true
+  log_level: "INFO"
+  save_screenshots: false
+  track_metrics: true
