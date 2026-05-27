@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SEO Traffic Bot - 自动化网站流量优化工具</title>
+    <meta name="description" content="SEO Traffic Bot是一款自动化网站流量生成工具，帮助您提升网站SEO排名，增加自然访问量">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+        }
+        
+        /* 导航栏 */
+        nav {
+            background: white;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            position: fixed;
+            width: 100%;
+            top: 0;
+            z-index: 1000;
+        }
+        
+        .nav-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .logo {
+            font-size: 1.5rem;
+            font-weight: bold;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .nav-links {
+            display: flex;
+            gap: 2rem;
+        }
+        
+        .nav-links a {
+            text-decoration: none;
+            color: #555;
+            font-weight: 500;
+            transition: color 0.3s;
+        }
+        
+        .nav-links a:hover {
+            color: #667eea;
+        }
+        
+        .btn {
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: 600;
+            transition: all 0.3s;
+            cursor: pointer;
+            border: none;
+            display: inline-block;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4);
+        }
+        
+        .btn-secondary {
+            background: white;
+            color: #667eea;
+            border: 2px solid #667eea;
+        }
+        
+        .btn-secondary:hover {
+            background: #667eea;
+            color: white;
+        }
+        
+        /* Hero区域 */
+        .hero {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 150px 2rem 100px;
+            text-align: center;
+        }
+        
+        .hero h1 {
+            font-size: 3.5rem;
+            margin-bottom: 1.5rem;
+            font-weight: 800;
+        }
+        
+        .hero p {
+            font-size: 1.3rem;
+            margin-bottom: 2rem;
+            opacity: 0.95;
+            max-width: 700px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        
+        .hero-buttons {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        
+        /* 特性区域 */
+        .features {
+            padding: 100px 2rem;
+            background: #f8fafc;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .section-title {
+            text-align: center;
+            margin-bottom: 4rem;
+        }
+        
+        .section-title h2 {
+            font-size: 2.5rem;
+            color: #1a202c;
+            margin-bottom: 1rem;
+        }
+        
+        .section-title p {
+            color: #718096;
+            font-size: 1.1rem;
+        }
+        
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+        }
+        
+        .feature-card {
+            background: white;
+            padding: 2.5rem;
+            border-radius: 16px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+        
+        .feature-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+        }
+        
+        .feature-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+        }
+        
+        .feature-card h3 {
+            font-size: 1.3rem;
+            margin-bottom: 1rem;
+            color: #1a202c;
+        }
+        
+        .feature-card p {
+            color: #718096;
+            line-height: 1.7;
+        }
+        
+        /* 价格区域 */
+        .pricing {
+            padding: 100px 2rem;
+            background: white;
+        }
+        
+        .pricing-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        
+        .pricing-card {
+            background: #f8fafc;
+            padding: 3rem 2rem;
+            border-radius: 16px;
+            text-align: center;
+            position: relative;
+            transition: transform 0.3s;
+        }
+        
+        .pricing-card:hover {
+            transform: translateY(-5px);
+        }
+        
+        .pricing-card.featured {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            transform: scale(1.05);
+        }
+        
+        .pricing-card.featured h3,
+        .pricing-card.featured .price,
+        .pricing-card.featured li {
+            color: white;
+        }
+        
+        .pricing-card h3 {
+            font-size: 1.5rem;
+            margin-bottom: 1rem;
+            color: #1a202c;
+        }
+        
+        .price {
+            font-size: 3rem;
+            font-weight: 800;
+            margin-bottom: 2rem;
+            color: #667eea;
+        }
+        
+        .price span {
+            font-size: 1rem;
+            font-weight: 400;
+        }
+        
+        .pricing-card ul {
+            list-style: none;
+            margin-bottom: 2rem;
+        }
+        
+        .pricing-card li {
+            padding: 0.75rem 0;
+            color: #4a5568;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        
+        .pricing-card li:last-child {
+            border-bottom: none;
+        }
+        
+        .badge {
+            position: absolute;
+            top: -12px;
+            right: 20px;
+            background: #10b981;
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            font-size: 0.875rem;
+            font-weight: 600;
+        }
+        
+        /* 使用步骤 */
+        .steps {
+            padding: 100px 2rem;
+            background: #f8fafc;
+        }
+        
+        .steps-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 2rem;
+        }
+        
+        .step {
+            text-align: center;
+            padding: 2rem;
+        }
+        
+        .step-number {
+            width: 60px;
+            height: 60px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            font-weight: bold;
+            margin: 0 auto 1.5rem;
+        }
+        
+        .step h3 {
+            margin-bottom: 1rem;
+            color: #1a202c;
+        }
+        
+        .step p {
+            color: #718096;
+        }
+        
+        /* CTA区域 */
+        .cta {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 100px 2rem;
+            text-align: center;
+        }
+        
+        .cta h2 {
+            font-size: 2.5rem;
+            margin-bottom: 1.5rem;
+        }
+        
+        .cta p {
+            font-size: 1.2rem;
+            margin-bottom: 2rem;
+            opacity: 0.95;
+        }
+        
+        /* 页脚 */
+        footer {
+            background: #1a202c;
+            color: white;
+            padding: 3rem 2rem;
+            text-align: center;
+        }
+        
+        footer p {
+            opacity: 0.8;
+        }
+        
+        /* 响应式 */
+        @media (max-width: 768px) {
+            .hero h1 {
+                font-size: 2.5rem;
+            }
+            
+            .nav-links {
+                display: none;
+            }
+            
+            .pricing-card.featured {
+                transform: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- 导航栏 -->
+    <nav>
+        <div class="nav-container">
+            <div class="logo">🚀 SEO Traffic Bot</div>
+            <div class="nav-links">
+                <a href="#features">功能特性</a>
+                <a href="#pricing">价格方案</a>
+                <a href="#steps">使用教程</a>
+                <a href="http://stats.zhongshunbaode.com" class="btn btn-secondary">用户登录</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero区域 -->
+    <section class="hero">
+        <h1>提升网站排名的秘密武器</h1>
+        <p>SEO Traffic Bot 是一款自动化网站流量生成工具，通过模拟真实用户访问，帮助您的网站获得更好的搜索引擎排名</p>
+        <div class="hero-buttons">
+            <a href="http://stats.zhongshunbaode.com/register" class="btn btn-primary" style="background: white; color: #667eea;">免费开始使用</a>
+            <a href="#features" class="btn btn-secondary" style="border-color: white; color: white;">了解更多</a>
+        </div>
+    </section>
+
+    <!-- 特性区域 -->
+    <section class="features" id="features">
+        <div class="container">
+            <div class="section-title">
+                <h2>强大的功能特性</h2>
+                <p>我们提供全方位的SEO流量优化解决方案</p>
+            </div>
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">🤖</div>
+                    <h3>智能反检测</h3>
+                    <p>使用先进的浏览器指纹伪装技术，模拟真实用户环境，避免被搜索引擎识别为机器人</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🎭</div>
+                    <h3>真实行为模拟</h3>
+                    <p>随机滚动、鼠标移动、点击链接，完全模拟真实用户的浏览行为模式</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🌐</div>
+                    <h3>代理IP轮换</h3>
+                    <p>支持代理池集成，自动轮换IP地址，确保每次访问都来自不同的网络环境</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">📊</div>
+                    <h3>详细统计报告</h3>
+                    <p>实时监控访问数据，生成可视化报表，清晰了解每个网站的流量增长情况</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">⚙️</div>
+                    <h3>灵活配置</h3>
+                    <p>支持自定义访问频率、停留时间、行为模式，满足不同网站的优化需求</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🔒</div>
+                    <h3>数据安全</h3>
+                    <p>所有数据本地存储，无需上传敏感信息，保障您的网站数据安全</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 价格区域 -->
+    <section class="pricing" id="pricing">
+        <div class="container">
+            <div class="section-title">
+                <h2>选择适合您的方案</h2>
+                <p>从免费版开始，随时升级到更强大的版本</p>
+            </div>
+            <div class="pricing-grid">
+                <div class="pricing-card">
+                    <h3>免费版</h3>
+                    <div class="price">¥0<span>/月</span></div>
+                    <ul>
+                        <li>✓ 最多8个网站</li>
+                        <li>✓ 每日20次访问/网站</li>
+                        <li>✓ 基础统计数据</li>
+                        <li>✓ 社区支持</li>
+                    </ul>
+                    <a href="http://stats.zhongshunbaode.com/register" class="btn btn-secondary">免费注册</a>
+                </div>
+                <div class="pricing-card featured">
+                    <span class="badge">推荐</span>
+                    <h3>专业版</h3>
+                    <div class="price">¥99<span>/月</span></div>
+                    <ul>
+                        <li>✓ 最多50个网站</li>
+                        <li>✓ 每日100次访问/网站</li>
+                        <li>✓ 高级统计分析</li>
+                        <li>✓ 优先技术支持</li>
+                        <li>✓ API接口访问</li>
+                    </ul>
+                    <a href="#" class="btn btn-primary" style="background: white; color: #667eea;">立即升级</a>
+                </div>
+                <div class="pricing-card">
+                    <h3>企业版</h3>
+                    <div class="price">¥299<span>/月</span></div>
+                    <ul>
+                        <li>✓ 无限网站数量</li>
+                        <li>✓ 无限访问次数</li>
+                        <li>✓ 定制化功能</li>
+                        <li>✓ 专属客服支持</li>
+                        <li>✓ 私有部署选项</li>
+                    </ul>
+                    <a href="#" class="btn btn-secondary">联系销售</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 使用步骤 -->
+    <section class="steps" id="steps">
+        <div class="container">
+            <div class="section-title">
+                <h2>简单四步开始使用</h2>
+                <p>无需技术背景，快速上手</p>
+            </div>
+            <div class="steps-grid">
+                <div class="step">
+                    <div class="step-number">1</div>
+                    <h3>注册账号</h3>
+                    <p>访问 stats.zhongshunbaode.com 注册免费账号</p>
+                </div>
+                <div class="step">
+                    <div class="step-number">2</div>
+                    <h3>添加网站</h3>
+                    <p>在控制台中添加您需要优化的网站URL</p>
+                </div>
+                <div class="step">
+                    <div class="step-number">3</div>
+                    <h3>启动优化</h3>
+                    <p>系统自动开始为您的网站生成流量</p>
+                </div>
+                <div class="step">
+                    <div class="step-number">4</div>
+                    <h3>查看效果</h3>
+                    <p>实时监控流量增长和排名变化</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA区域 -->
+    <section class="cta">
+        <div class="container">
+            <h2>准备好提升您的网站排名了吗？</h2>
+            <p>立即注册，免费开始使用SEO Traffic Bot</p>
+            <a href="http://stats.zhongshunbaode.com/register" class="btn btn-primary" style="background: white; color: #667eea; font-size: 1.1rem; padding: 1rem 2.5rem;">免费注册账号</a>
+        </div>
+    </section>
+
+    <!-- 页脚 -->
+    <footer>
+        <p>&copy; 2024 SEO Traffic Bot. All rights reserved. | <a href="http://stats.zhongshunbaode.com" style="color: #667eea;">用户登录</a></p>
+    </footer>
+</body>
+</html>
