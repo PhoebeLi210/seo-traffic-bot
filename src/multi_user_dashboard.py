@@ -4,12 +4,15 @@
 
 import json
 import os
+import re
 import secrets
+import ssl
+import urllib.request
 from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib.parse import parse_qs, urlparse, unquote
+from urllib.parse import parse_qs, urlparse, unquote, quote
 import threading
 from loguru import logger
 
@@ -89,6 +92,66 @@ class MultiUserDashboard:
             "daily_data": daily_data,
             "days": days
         }
+
+    def _check_rank(self, keyword: str, domain: str, engine: str) -> dict:
+        """查询指定关键词在搜索引擎中的排名"""
+        engine_urls = {
+            'google': 'https://www.google.com/search?q={keyword}&num=50&hl=en',
+            'baidu': 'https://www.baidu.com/s?wd={keyword}&rn=50',
+            'bing': 'https://www.bing.com/search?q={keyword}&count=50',
+            '360': 'https://www.so.com/s?q={keyword}',
+            'sogou': 'https://www.sogou.com/web?query={keyword}',
+            'yisou': 'https://www.yisou.com/s?q={keyword}',
+        }
+
+        url_template = engine_urls.get(engine)
+        if not url_template:
+            return {"engine": engine, "rank": 0, "found": False}
+
+        search_url = url_template.format(keyword=quote(keyword))
+
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+        }
+
+        try:
+            req = urllib.request.Request(search_url, headers=headers)
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            with urllib.request.urlopen(req, timeout=15, context=ctx) as resp:
+                html = resp.read().decode('utf-8', errors='ignore')
+
+            # 提取所有链接
+            links = re.findall(r'href=["\']?(https?://[^"\'\s>]+)', html)
+
+            # 规范化 domain 用于匹配
+            domain_lower = domain.lower().replace('https://', '').replace('http://', '').rstrip('/')
+            if not domain_lower.startswith('www.'):
+                domain_variants = [domain_lower, 'www.' + domain_lower]
+            else:
+                domain_variants = [domain_lower, domain_lower[4:]]
+
+            position = 0
+            for i, link in enumerate(links):
+                link_lower = link.lower()
+                for variant in domain_variants:
+                    if variant in link_lower:
+                        position = i + 1
+                        break
+                if position > 0:
+                    break
+
+            if position > 0:
+                return {"engine": engine, "rank": position, "found": True}
+            else:
+                return {"engine": engine, "rank": 0, "found": False}
+
+        except Exception as e:
+            logger.error(f"排名查询失败 [{engine}]: {e}")
+            return {"engine": engine, "rank": 0, "found": False, "error": str(e)}
 
     # ==================== 页面生成 ====================
 
@@ -406,6 +469,28 @@ class MultiUserDashboard:
         .tab-content {{ display: none; }}
         .tab-content.active {{ display: block; }}
 
+        /* 排名查询 */
+        .rank-query-card {{ padding: 20px; }}
+        .rank-form {{ display: flex; flex-direction: column; gap: 16px; }}
+        .rank-form-row {{ display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; }}
+        .rank-form-group {{ flex: 1; min-width: 200px; }}
+        .rank-form-group label {{ display: block; margin-bottom: 6px; color: #555; font-weight: 500; font-size: 0.9em; }}
+        .rank-form-group select,
+        .rank-form-group input[type="text"] {{ width: 100%; padding: 10px 14px; border: 2px solid #e0e0e0;
+            border-radius: 8px; font-size: 0.95em; }}
+        .rank-form-group select:focus,
+        .rank-form-group input[type="text"]:focus {{ outline: none; border-color: #667eea; }}
+        .rank-engines-group {{ flex: unset; width: 100%; }}
+        .rank-checkboxes {{ display: flex; flex-wrap: wrap; gap: 12px; margin-top: 4px; }}
+        .rank-checkbox {{ display: flex; align-items: center; gap: 6px; cursor: pointer;
+            font-size: 0.9em; color: #444; padding: 6px 12px; border: 1px solid #e0e0e0;
+            border-radius: 6px; transition: all 0.2s; }}
+        .rank-checkbox:hover {{ border-color: #667eea; background: #f8f9ff; }}
+        .rank-checkbox input[type="checkbox"] {{ width: 16px; height: 16px; cursor: pointer; }}
+        .rank-loading {{ color: #667eea; font-style: italic; }}
+        .rank-found {{ color: #10b981; font-weight: 700; }}
+        .rank-not-found {{ color: #ef4444; }}
+
         /* 响应式 - 移动端优化 */
         @media (max-width: 768px) {{
             /* 导航栏改为两行布局 */
@@ -502,6 +587,30 @@ class MultiUserDashboard:
             .modal h2 {{
                 font-size: 1.1em;
             }}
+
+            /* 排名查询移动端适配 */
+            .rank-query-card {{
+                padding: 15px;
+            }}
+            .rank-form-row {{
+                flex-direction: column;
+                gap: 12px;
+            }}
+            .rank-form-group {{
+                min-width: unset;
+                width: 100%;
+            }}
+            .rank-checkboxes {{
+                gap: 8px;
+            }}
+            .rank-checkbox {{
+                font-size: 0.8em;
+                padding: 5px 8px;
+            }}
+            .rank-result-card th:nth-child(2),
+            .rank-result-card td:nth-child(2) {{
+                display: none;
+            }}
         }}
         
         /* 超小屏幕 (< 480px) */
@@ -526,6 +635,13 @@ class MultiUserDashboard:
             .main {{
                 padding: 15px 10px;
             }}
+            .rank-checkbox {{
+                font-size: 0.75em;
+                padding: 4px 6px;
+            }}
+            .rank-checkboxes {{
+                gap: 6px;
+            }}
         }}
     </style>
 </head>
@@ -537,6 +653,7 @@ class MultiUserDashboard:
     <div class="nav-tabs">
         <button class="nav-tab active" onclick="switchTab('websites')">🌐 网站管理</button>
         <button class="nav-tab" onclick="switchTab('stats')">📊 统计数据</button>
+        <button class="nav-tab" onclick="switchTab('rank')">🔍 排名查询</button>
     </div>
     <div class="user-info">
         <span class="user-name">👤 {user.username}</span>
@@ -616,6 +733,66 @@ class MultiUserDashboard:
                 </thead>
                 <tbody>
                     {stats_rows}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- 排名查询 Tab -->
+    <div id="tab-rank" class="tab-content">
+        <div class="action-bar">
+            <div>
+                <h2>搜索引擎排名查询</h2>
+                <span class="hint">查询网站关键词在各搜索引擎中的排名</span>
+            </div>
+        </div>
+        <div class="card rank-query-card">
+            <div class="rank-form">
+                <div class="rank-form-row">
+                    <div class="rank-form-group">
+                        <label>选择网站</label>
+                        <select id="rankDomain">
+                            <option value="">-- 请选择网站 --</option>
+                        </select>
+                    </div>
+                    <div class="rank-form-group">
+                        <label>输入关键词</label>
+                        <input type="text" id="rankKeyword" placeholder="请输入要查询的关键词">
+                    </div>
+                </div>
+                <div class="rank-form-row">
+                    <div class="rank-form-group rank-engines-group">
+                        <label>选择搜索引擎</label>
+                        <div class="rank-checkboxes">
+                            <label class="rank-checkbox"><input type="checkbox" value="google" checked> Google</label>
+                            <label class="rank-checkbox"><input type="checkbox" value="baidu" checked> 百度</label>
+                            <label class="rank-checkbox"><input type="checkbox" value="bing" checked> Bing</label>
+                            <label class="rank-checkbox"><input type="checkbox" value="360" checked> 360搜索</label>
+                            <label class="rank-checkbox"><input type="checkbox" value="sogou" checked> 搜狗</label>
+                            <label class="rank-checkbox"><input type="checkbox" value="yisou" checked> 一搜</label>
+                        </div>
+                    </div>
+                </div>
+                <div class="rank-form-row">
+                    <button class="btn btn-primary" id="rankQueryBtn" onclick="checkRank()">开始查询</button>
+                </div>
+            </div>
+        </div>
+        <div class="card rank-result-card" style="margin-top: 16px;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>搜索引擎</th>
+                        <th>关键词</th>
+                        <th class="center">排名</th>
+                        <th class="center">状态</th>
+                    </tr>
+                </thead>
+                <tbody id="rankResultBody">
+                    <tr><td colspan="4" class="empty-state">
+                        <div class="empty-icon">🔍</div>
+                        <p>请选择网站并输入关键词后查询</p>
+                    </td></tr>
                 </tbody>
             </table>
         </div>
@@ -794,6 +971,87 @@ function saveToServer() {{
         }}
     }}).catch(err => alert('网络错误: ' + err));
 }}
+
+// ==================== 排名查询 ====================
+
+const engineNames = {{
+    'google': 'Google',
+    'baidu': '百度',
+    'bing': 'Bing',
+    '360': '360搜索',
+    'sogou': '搜狗',
+    'yisou': '一搜'
+}};
+
+// 初始化排名查询的网站下拉框
+function initRankDropdown() {{
+    const select = document.getElementById('rankDomain');
+    select.innerHTML = '<option value="">-- 请选择网站 --</option>';
+    websites.forEach(ws => {{
+        const opt = document.createElement('option');
+        opt.value = ws.url;
+        opt.textContent = ws.url.length > 50 ? ws.url.substring(0, 50) + '...' : ws.url;
+        select.appendChild(opt);
+    }});
+}}
+
+// 排名查询
+async function checkRank() {{
+    const domain = document.getElementById('rankDomain').value;
+    const keyword = document.getElementById('rankKeyword').value.trim();
+
+    if (!domain) {{ alert('请选择一个网站'); return; }}
+    if (!keyword) {{ alert('请输入关键词'); return; }}
+
+    const checkboxes = document.querySelectorAll('.rank-checkboxes input[type="checkbox"]:checked');
+    if (checkboxes.length === 0) {{ alert('请至少选择一个搜索引擎'); return; }}
+
+    const engines = Array.from(checkboxes).map(cb => cb.value);
+    const tbody = document.getElementById('rankResultBody');
+    const btn = document.getElementById('rankQueryBtn');
+
+    btn.disabled = true;
+    btn.textContent = '查询中...';
+
+    // 先生成所有行的 loading 状态
+    let rows = '';
+    engines.forEach(eng => {{
+        rows += `<tr id="rank-row-${{eng}}">
+            <td>${{engineNames[eng] || eng}}</td>
+            <td>${{keyword}}</td>
+            <td class="center rank-loading">查询中...</td>
+            <td class="center rank-loading">查询中...</td>
+        </tr>`;
+    }});
+    tbody.innerHTML = rows;
+
+    // 逐个查询
+    for (const eng of engines) {{
+        const row = document.getElementById('rank-row-' + eng);
+        try {{
+            const resp = await fetch(`/api/rank?engine=${{encodeURIComponent(eng)}}&keyword=${{encodeURIComponent(keyword)}}&domain=${{encodeURIComponent(domain)}}`);
+            const data = await resp.json();
+            if (data.found) {{
+                row.cells[2].innerHTML = `<span class="rank-found">第 ${{data.rank}} 名</span>`;
+                row.cells[3].innerHTML = '<span class="rank-found">已找到</span>';
+            }} else {{
+                row.cells[2].innerHTML = '-';
+                row.cells[3].innerHTML = '<span class="rank-not-found">未找到 (前50名)</span>';
+            }}
+        }} catch (err) {{
+            row.cells[2].innerHTML = '-';
+            row.cells[3].innerHTML = '<span class="rank-not-found">查询失败</span>';
+        }}
+    }}
+
+    btn.disabled = false;
+    btn.textContent = '开始查询';
+}}
+
+// 页面加载时初始化排名下拉框
+document.addEventListener('DOMContentLoaded', function() {{
+    initRankDropdown();
+}});
 </script>
 
 </body>
@@ -860,6 +1118,20 @@ function saveToServer() {{
                         })
                     else:
                         self._send_json({'error': '用户不存在'}, 404)
+
+                elif path == '/api/rank':
+                    if not user_id:
+                        self._send_json({'error': '未登录'}, 401)
+                        return
+                    query_params = parse_qs(parsed_path.query)
+                    engine = query_params.get('engine', [''])[0]
+                    keyword = query_params.get('keyword', [''])[0]
+                    domain = query_params.get('domain', [''])[0]
+                    if not engine or not keyword or not domain:
+                        self._send_json({'error': '缺少必要参数 (engine, keyword, domain)'}, 400)
+                        return
+                    result = dashboard._check_rank(keyword, domain, engine)
+                    self._send_json(result)
 
                 else:
                     self._send_html('<h1>404 - 页面不存在</h1>', 404)
