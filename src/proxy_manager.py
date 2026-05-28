@@ -15,22 +15,9 @@ from .config_manager import config
 class ProxyManager:
     """代理管理器 - 支持多代理源轮换"""
     
-    # 免费代理API列表（按优先级排序）
-    FREE_PROXY_APIS = [
-        # Horocn 免费代理 (国内)
-        {
-            'name': 'horocn_free',
-            'url': 'https://proxy.horocn.com/free-proxy-list?format=text',
-            'parser': 'text',  # 返回格式: ip:port
-        },
-        # 89免费代理
-        {
-            'name': '89ip',
-            'url': 'https://www.89ip.cn/index.html',  # 需要解析HTML，较复杂
-            'parser': 'json',
-            'api': 'https://www.89ip.cn/index.html?page=1&limit=20',  # 测试用
-        },
-    ]
+    # 免费代理API列表（已禁用，因为都返回404）
+    # 如果需要启用代理，可以在这里添加其他有效的代理源
+    FREE_PROXY_APIS = []
     
     # 付费代理API模板（需要用户提供）
     PAID_PROXY_APIS = []

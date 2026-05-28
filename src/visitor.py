@@ -3,6 +3,7 @@
 """
 
 import asyncio
+import random
 from datetime import datetime
 from typing import Optional, Dict, Any
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page
@@ -50,19 +51,14 @@ class WebsiteVisitor:
             # 获取代理
             proxy = await proxy_manager.get_proxy_with_retry()
             
-            # 启动浏览器
+            # 启动浏览器 - 使用简化参数提高稳定性
             async with async_playwright() as p:
                 browser = await p.chromium.launch(
                     headless=self.headless,
                     args=[
-                        '--disable-blink-features=AutomationControlled',
-                        '--disable-web-security',
-                        '--disable-features=IsolateOrigins,site-per-process',
                         '--no-sandbox',
                         '--disable-dev-shm-usage',
                         '--disable-gpu',
-                        '--disable-extensions',
-                        '--disable-plugins',
                     ]
                 )
             
