@@ -58,11 +58,12 @@ class MultiUserServer:
                     
                     # 访问所有网站
                     for site_config in all_websites:
-                        user_id = site_config.pop('_user_id', None)
+                        user_id = site_config.get('_user_id')
                         
-                        # 创建网站配置对象
+                        # 创建网站配置对象（排除 _user_id 字段）
                         from src.config_manager import WebsiteConfig
-                        website = WebsiteConfig(**site_config)
+                        config_copy = {k: v for k, v in site_config.items() if not k.startswith('_')}
+                        website = WebsiteConfig(**config_copy)
                         
                         if website.enabled:
                             # 访问网站
@@ -73,15 +74,58 @@ class MultiUserServer:
                                 user_stats_dir = user_manager.get_user_data_dir(user_id) / "stats"
                                 user_stats_dir.mkdir(parents=True, exist_ok=True)
                                 
-                                # 这里可以添加用户专属的统计记录逻辑
+                                # 使用用户专属目录保存统计
+                                from datetime import date
+                                today = date.today().isoformat()
+                                stats_file = user_stats_dir / f"{today}.json"
+                                
+                                # 加载或创建今日统计
+                                import json
+                                if stats_file.exists():
+                                    try:
+                                        with open(stats_file, 'r', encoding='utf-8') as f:
+                                            today_stats = json.load(f)
+                                    except:
+                                        today_stats = {"date": today, "total_visits": 0, "successful_visits": 0, "failed_visits": 0, "websites": {}}
+                                else:
+                                    today_stats = {"date": today, "total_visits": 0, "successful_visits": 0, "failed_visits": 0, "websites": {}}
+                                
+                                # 更新统计
+                                today_stats["total_visits"] += 1
+                                if result.get("success"):
+                                    today_stats["successful_visits"] += 1
+                                else:
+                                    today_stats["failed_visits"] += 1
+                                
+                                url = result.get("url", "unknown")
+                                if url not in today_stats["websites"]:
+                                    today_stats["websites"][url] = {"total_visits": 0, "successful_visits": 0, "failed_visits": 0}
+                                
+                                today_stats["websites"][url]["total_visits"] += 1
+                                if result.get("success"):
+                                    today_stats["websites"][url]["successful_visits"] += 1
+                                else:
+                                    today_stats["websites"][url]["failed_visits"] += 1
+                                
+                                # 保存统计
+                                with open(stats_file, 'w', encoding='utf-8') as f:
+                                    json.dump(today_stats, f, ensure_ascii=False, indent=2)
+                                
+                                # 同时调用 monitor（可选）
                                 monitor.record_visit(result)
+                                
+                                # 打印结果
+                                if result.get("success"):
+                                    logger.info(f"✅ 访问成功: {url[:50]}...")
+                                else:
+                                    logger.error(f"❌ 访问失败: {url[:50]}... 错误: {result.get('error', '未知')[:50]}")
                 else:
                     logger.info("⏳ 没有需要访问的网站")
                 
                 # 等待下一轮
                 import random
-                wait_time = random.randint(300, 600)  # 5-10分钟
-                logger.info(f"⏳ 等待 {wait_time // 60} 分钟后开始下一轮...")
+                wait_time = random.randint(60, 180)  # 1-3分钟（缩短等待时间）
+                logger.info(f"⏳ 等待 {wait_time} 秒后开始下一轮...")
                 
                 waited = 0
                 while waited < wait_time and self.running:
