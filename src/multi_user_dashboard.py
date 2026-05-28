@@ -406,13 +406,126 @@ class MultiUserDashboard:
         .tab-content {{ display: none; }}
         .tab-content.active {{ display: block; }}
 
-        /* 响应式 */
+        /* 响应式 - 移动端优化 */
         @media (max-width: 768px) {{
-            .stats-row {{ grid-template-columns: repeat(2, 1fr); }}
-            .navbar {{ padding: 0 15px; }}
-            .navbar .nav-tabs {{ gap: 2px; }}
-            .navbar .nav-tab {{ padding: 8px 12px; font-size: 0.85em; }}
-            .action-bar {{ flex-direction: column; gap: 10px; align-items: flex-start; }}
+            /* 导航栏改为两行布局 */
+            .navbar {{
+                flex-wrap: wrap;
+                height: auto;
+                padding: 12px 15px;
+            }}
+            .navbar .logo {{
+                font-size: 1.1em;
+                margin-right: 0;
+                width: 100%;
+                text-align: center;
+                margin-bottom: 10px;
+            }}
+            .navbar .nav-tabs {{
+                width: 100%;
+                justify-content: center;
+                gap: 8px;
+            }}
+            .navbar .nav-tab {{
+                padding: 8px 16px;
+                font-size: 0.9em;
+            }}
+            .navbar .user-info {{
+                width: 100%;
+                justify-content: center;
+                margin-top: 10px;
+                padding-top: 10px;
+                border-top: 1px solid #eee;
+            }}
+            
+            /* 统计卡片 2列布局，紧凑样式 */
+            .stats-row {{
+                grid-template-columns: repeat(2, 1fr);
+                gap: 10px;
+                margin-bottom: 20px;
+            }}
+            .stat-card {{
+                padding: 15px;
+            }}
+            .stat-card .label {{
+                font-size: 0.75em;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }}
+            .stat-card .value {{
+                font-size: 1.5em;
+            }}
+            
+            /* 操作栏 */
+            .action-bar {{
+                flex-direction: column;
+                gap: 12px;
+                align-items: stretch;
+            }}
+            .action-bar h2 {{
+                font-size: 1.1em;
+            }}
+            .action-bar .btn {{
+                width: 100%;
+            }}
+            
+            /* 表格改为卡片式 */
+            .card {{
+                border-radius: 8px;
+            }}
+            .card th {{
+                padding: 10px 12px;
+                font-size: 0.8em;
+            }}
+            .card td {{
+                padding: 10px 12px;
+                font-size: 0.85em;
+            }}
+            /* 移动端隐藏部分表格列 */
+            .card th:nth-child(2),
+            .card td:nth-child(2),
+            .card th:nth-child(3),
+            .card td:nth-child(3) {{
+                display: none;
+            }}
+            .url-link {{
+                font-size: 0.85em;
+            }}
+            
+            /* 模态框 */
+            .modal {{
+                padding: 20px;
+                width: 95%;
+                max-height: 85vh;
+            }}
+            .modal h2 {{
+                font-size: 1.1em;
+            }}
+        }}
+        
+        /* 超小屏幕 (< 480px) */
+        @media (max-width: 480px) {{
+            .navbar .nav-tab {{
+                padding: 6px 10px;
+                font-size: 0.8em;
+            }}
+            .navbar .user-name {{
+                font-size: 0.85em;
+            }}
+            .stats-row {{
+                grid-template-columns: 1fr 1fr;
+                gap: 8px;
+            }}
+            .stat-card {{
+                padding: 12px;
+            }}
+            .stat-card .value {{
+                font-size: 1.3em;
+            }}
+            .main {{
+                padding: 15px 10px;
+            }}
         }}
     </style>
 </head>
