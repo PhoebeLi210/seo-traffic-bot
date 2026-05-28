@@ -94,6 +94,66 @@ class MultiUserDashboard:
             "days": days
         }
 
+    def _get_user_tasks_file(self, user_id: str) -> Path:
+        """获取用户任务文件路径"""
+        return user_manager.get_user_data_dir(user_id) / "tasks.json"
+
+    def _load_tasks(self, user_id: str) -> List[Dict]:
+        """从用户目录加载任务列表"""
+        f = self._get_user_tasks_file(user_id)
+        if f.exists():
+            try:
+                with open(f, 'r', encoding='utf-8') as fp:
+                    return json.load(fp).get('tasks', [])
+            except Exception:
+                return []
+        return []
+
+    def _save_task(self, user_id: str, task: Dict):
+        """保存单个任务"""
+        tasks = self._load_tasks(user_id)
+        # 查找并更新或添加新任务
+        found = False
+        for i, t in enumerate(tasks):
+            if t.get('task_id') == task.get('task_id'):
+                tasks[i] = task
+                found = True
+                break
+        if not found:
+            tasks.append(task)
+        # 保存到文件
+        f = self._get_user_tasks_file(user_id)
+        f.parent.mkdir(parents=True, exist_ok=True)
+        with open(f, 'w', encoding='utf-8') as fp:
+            json.dump({'tasks': tasks}, fp, ensure_ascii=False, indent=2)
+
+    def _delete_task(self, user_id: str, task_id: str) -> bool:
+        """删除单个任务"""
+        tasks = self._load_tasks(user_id)
+        original_len = len(tasks)
+        tasks = [t for t in tasks if t.get('task_id') != task_id]
+        if len(tasks) == original_len:
+            return False
+        f = self._get_user_tasks_file(user_id)
+        with open(f, 'w', encoding='utf-8') as fp:
+            json.dump({'tasks': tasks}, fp, ensure_ascii=False, indent=2)
+        return True
+
+    def _get_task_stats(self, user_id: str) -> Dict:
+        """获取任务统计"""
+        tasks = self._load_tasks(user_id)
+        running_count = sum(1 for t in tasks if t.get('status') == 'running')
+        paused_count = sum(1 for t in tasks if t.get('status') == 'paused')
+        total_optimized = sum(t.get('total_optimized', 0) for t in tasks)
+        daily_optimized = sum(t.get('daily_optimized', 0) for t in tasks)
+        return {
+            "total_tasks": len(tasks),
+            "running_tasks": running_count,
+            "paused_tasks": paused_count,
+            "total_optimized": total_optimized,
+            "daily_optimized": daily_optimized
+        }
+
     def _check_rank(self, keyword: str, domain: str, engine: str, device: str = "pc") -> dict:
         """查询指定关键词在搜索引擎中的排名
         device: 'pc' 或 'mobile'
@@ -648,6 +708,56 @@ class MultiUserDashboard:
                 gap: 6px;
             }}
         }}
+
+        /* 任务表格样式 */
+        .task-table th,
+        .task-table td {{
+            padding: 10px 8px;
+        }}
+        
+        /* 任务列表移动端响应式 - 隐藏部分列 */
+        @media (max-width: 768px) {{
+            .task-table .task-col-initial,
+            .task-table .task-col-time {{
+                display: none;
+            }}
+            .task-table th,
+            .task-table td {{
+                padding: 8px 6px;
+                font-size: 0.85em;
+            }}
+            .batch-bar {{
+                flex-wrap: wrap;
+                gap: 8px;
+            }}
+            .batch-bar .btn-sm {{
+                padding: 4px 8px;
+                font-size: 0.75em;
+            }}
+            .filter-bar {{
+                flex-direction: column;
+                align-items: stretch !important;
+            }}
+            .filter-group {{
+                min-width: unset !important;
+                width: 100%;
+            }}
+            .filter-group input,
+            .filter-group select {{
+                width: 100%;
+            }}
+        }}
+        
+        @media (max-width: 480px) {{
+            .task-table .task-col-select {{
+                display: none;
+            }}
+            .task-table th,
+            .task-table td {{
+                padding: 6px 4px;
+                font-size: 0.8em;
+            }}
+        }}
     </style>
 </head>
 <body>
@@ -659,6 +769,7 @@ class MultiUserDashboard:
         <button class="nav-tab active" onclick="switchTab('websites')">🌐 网站管理</button>
         <button class="nav-tab" onclick="switchTab('stats')">📊 统计数据</button>
         <button class="nav-tab" onclick="switchTab('rank')">🔍 排名查询</button>
+        <button class="nav-tab" onclick="switchTab('tasks')">📋 任务列表</button>
     </div>
     <div class="user-info">
         <span class="user-name">👤 {user.username}</span>
@@ -812,6 +923,81 @@ class MultiUserDashboard:
         </div>
     </div>
 
+    <!-- 任务列表 Tab -->
+    <div id="tab-tasks" class="tab-content">
+        <div class="action-bar">
+            <div>
+                <h2>任务列表</h2>
+                <span class="hint">管理关键词排名优化任务</span>
+            </div>
+            <button class="btn btn-primary" onclick="openAddTaskModal()">＋ 添加任务</button>
+        </div>
+        <!-- 过滤栏 -->
+        <div class="card" style="margin-bottom: 16px; padding: 16px;">
+            <div class="filter-bar" style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center;">
+                <div class="filter-group" style="flex: 1; min-width: 200px;">
+                    <input type="text" id="taskFilterKeyword" placeholder="搜索关键词..." style="width: 100%; padding: 8px 12px; border: 1px solid #e0e0e0; border-radius: 6px; font-size: 0.9em;">
+                </div>
+                <div class="filter-group">
+                    <select id="taskFilterEngine" style="padding: 8px 12px; border: 1px solid #e0e0e0; border-radius: 6px; font-size: 0.9em;">
+                        <option value="">全部搜索引擎</option>
+                        <option value="baidu">百度</option>
+                        <option value="360">360搜索</option>
+                        <option value="sogou">搜狗</option>
+                        <option value="google">Google</option>
+                        <option value="bing">Bing</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <select id="taskFilterStatus" style="padding: 8px 12px; border: 1px solid #e0e0e0; border-radius: 6px; font-size: 0.9em;">
+                        <option value="">全部状态</option>
+                        <option value="running">运行中</option>
+                        <option value="paused">已暂停</option>
+                    </select>
+                </div>
+                <button class="btn btn-gray" onclick="filterTasks()">筛选</button>
+            </div>
+        </div>
+        <!-- 批量操作栏 -->
+        <div class="batch-bar" style="display: flex; gap: 10px; margin-bottom: 16px; align-items: center;">
+            <input type="checkbox" id="selectAllTasks" onchange="toggleSelectAll()" style="width: 18px; height: 18px; cursor: pointer;">
+            <label for="selectAllTasks" style="cursor: pointer; font-size: 0.9em; color: #555;">全选</label>
+            <span style="color: #ccc;">|</span>
+            <button class="btn btn-sm btn-success" onclick="batchAction('start')">▶ 批量启动</button>
+            <button class="btn btn-sm btn-gray" onclick="batchAction('pause')">⏸ 批量暂停</button>
+            <button class="btn btn-sm btn-danger" onclick="batchAction('delete')">🗑 批量删除</button>
+            <span id="selectedCount" style="margin-left: auto; font-size: 0.85em; color: #888;">已选择 0 项</span>
+        </div>
+        <!-- 任务表格 -->
+        <div class="card">
+            <table class="task-table">
+                <thead>
+                    <tr>
+                        <th style="width: 40px;" class="task-col-select">选择</th>
+                        <th>关键词</th>
+                        <th>网址</th>
+                        <th class="center">搜索引擎</th>
+                        <th class="center task-col-initial">初排</th>
+                        <th class="center">新排</th>
+                        <th class="center">变化</th>
+                        <th class="center task-col-time">排名时间</th>
+                        <th class="center">日优</th>
+                        <th class="center">已优</th>
+                        <th class="center">状态</th>
+                        <th class="center">操作</th>
+                    </tr>
+                </thead>
+                <tbody id="taskTableBody">
+                    <tr><td colspan="12" class="empty-state">
+                        <div class="empty-icon">📋</div>
+                        <p>暂无任务</p>
+                        <p class="text-muted">点击上方"添加任务"按钮创建新任务</p>
+                    </td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
 </div>
 
 <!-- 添加/编辑网站 模态框 -->
@@ -887,7 +1073,17 @@ function switchTab(tab) {{
     document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
     document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
     document.getElementById('tab-' + tab).classList.add('active');
-    event.target.classList.add('active');
+    // 找到对应的nav-tab并添加active类
+    const tabButtons = document.querySelectorAll('.nav-tab');
+    const tabNames = ['websites', 'stats', 'rank', 'tasks'];
+    const tabIndex = tabNames.indexOf(tab);
+    if (tabIndex >= 0 && tabButtons[tabIndex]) {{
+        tabButtons[tabIndex].classList.add('active');
+    }}
+    // 如果切换到任务列表，刷新任务数据
+    if (tab === 'tasks') {{
+        filterTasks();
+    }}
 }}
 
 // 打开添加模态框
@@ -1200,6 +1396,204 @@ function addBaiduKeyword(idx) {{
         }}
     }}
 }}
+
+// ==================== 任务列表管理 ====================
+
+let allTasks = [];
+let selectedTaskIds = new Set();
+
+const engineDisplayNames = {{
+    'baidu': '百度',
+    '360': '360搜索',
+    'sogou': '搜狗',
+    'google': 'Google',
+    'bing': 'Bing',
+    'yisou': '一搜'
+}};
+
+// 加载任务列表
+async function loadTasks() {{
+    try {{
+        const resp = await fetch('/api/tasks');
+        const data = await resp.json();
+        if (data.tasks) {{
+            allTasks = data.tasks;
+            renderTasks(allTasks);
+        }}
+    }} catch (err) {{
+        console.error('加载任务失败:', err);
+    }}
+}}
+
+// 渲染任务表格
+function renderTasks(tasks) {{
+    const tbody = document.getElementById('taskTableBody');
+    if (!tasks || tasks.length === 0) {{
+        tbody.innerHTML = `<tr><td colspan="12" class="empty-state">
+            <div class="empty-icon">📋</div>
+            <p>暂无任务</p>
+            <p class="text-muted">点击上方"添加任务"按钮创建新任务</p>
+        </td></tr>`;
+        return;
+    }}
+    
+    let html = '';
+    tasks.forEach(task => {{
+        const isSelected = selectedTaskIds.has(task.task_id);
+        const rankChange = task.initial_rank && task.current_rank ? task.initial_rank - task.current_rank : 0;
+        const changeHtml = rankChange > 0 
+            ? `<span style="color: #10b981;">↑${{rankChange}}</span>`
+            : (rankChange < 0 ? `<span style="color: #ef4444;">↓${{Math.abs(rankChange)}}</span>` : '-');
+        const statusBadge = task.status === 'running' 
+            ? '<span class="badge badge-success">运行中</span>'
+            : '<span class="badge badge-gray">已暂停</span>';
+        const actionBtn = task.status === 'running'
+            ? `<button class="btn btn-sm btn-gray" onclick="toggleTask('${{task.task_id}}')">⏸ 暂停</button>`
+            : `<button class="btn btn-sm btn-success" onclick="toggleTask('${{task.task_id}}')">▶ 启动</button>`;
+        const domain = task.url ? new URL(task.url).hostname : '-';
+        
+        html += `<tr>
+            <td class="center task-col-select"><input type="checkbox" class="task-checkbox" value="${{task.task_id}}" ${{isSelected ? 'checked' : ''}} onchange="toggleTaskSelection('${{task.task_id}}')"></td>
+            <td>${{task.keyword || '-'}}</td>
+            <td>${{domain}}</td>
+            <td class="center">${{engineDisplayNames[task.engine] || task.engine}}</td>
+            <td class="center task-col-initial">${{task.initial_rank || '-'}}</td>
+            <td class="center">${{task.current_rank || '-'}}</td>
+            <td class="center">${{changeHtml}}</td>
+            <td class="center task-col-time">${{task.last_check || '-'}}</td>
+            <td class="center">${{task.daily_optimized || 0}}</td>
+            <td class="center">${{task.total_optimized || 0}}</td>
+            <td class="center">${{statusBadge}}</td>
+            <td class="center">${{actionBtn}}</td>
+        </tr>`;
+    }});
+    tbody.innerHTML = html;
+}}
+
+// 切换任务选择
+function toggleTaskSelection(taskId) {{
+    if (selectedTaskIds.has(taskId)) {{
+        selectedTaskIds.delete(taskId);
+    }} else {{
+        selectedTaskIds.add(taskId);
+    }}
+    updateSelectedCount();
+}}
+
+// 全选/取消全选
+function toggleSelectAll() {{
+    const selectAll = document.getElementById('selectAllTasks').checked;
+    const checkboxes = document.querySelectorAll('.task-checkbox');
+    checkboxes.forEach(cb => {{
+        cb.checked = selectAll;
+        const taskId = cb.value;
+        if (selectAll) {{
+            selectedTaskIds.add(taskId);
+        }} else {{
+            selectedTaskIds.delete(taskId);
+        }}
+    }});
+    updateSelectedCount();
+}}
+
+// 更新已选择计数
+function updateSelectedCount() {{
+    document.getElementById('selectedCount').textContent = `已选择 ${{selectedTaskIds.size}} 项`;
+}}
+
+// 切换单个任务状态
+async function toggleTask(taskId) {{
+    try {{
+        const resp = await fetch('/api/task/toggle', {{
+            method: 'POST',
+            headers: {{'Content-Type': 'application/json'}},
+            body: JSON.stringify({{task_id: taskId}})
+        }});
+        const data = await resp.json();
+        if (data.success) {{
+            filterTasks(); // 刷新列表
+        }} else {{
+            alert('操作失败: ' + (data.error || '未知错误'));
+        }}
+    }} catch (err) {{
+        alert('网络错误: ' + err);
+    }}
+}}
+
+// 批量操作
+async function batchAction(action) {{
+    if (selectedTaskIds.size === 0) {{
+        alert('请先选择任务');
+        return;
+    }}
+    
+    const actionNames = {{'start': '启动', 'pause': '暂停', 'delete': '删除'}};
+    if (action === 'delete' && !confirm(`确定要删除选中的 ${{selectedTaskIds.size}} 个任务吗？`)) {{
+        return;
+    }}
+    
+    try {{
+        const resp = await fetch('/api/task/batch_action', {{
+            method: 'POST',
+            headers: {{'Content-Type': 'application/json'}},
+            body: JSON.stringify({{
+                action: action,
+                task_ids: Array.from(selectedTaskIds)
+            }})
+        }});
+        const data = await resp.json();
+        if (data.success) {{
+            selectedTaskIds.clear();
+            document.getElementById('selectAllTasks').checked = false;
+            updateSelectedCount();
+            filterTasks(); // 刷新列表
+        }} else {{
+            alert('操作失败: ' + (data.error || '未知错误'));
+        }}
+    }} catch (err) {{
+        alert('网络错误: ' + err);
+    }}
+}}
+
+// 过滤任务
+async function filterTasks() {{
+    const keyword = document.getElementById('taskFilterKeyword').value.trim();
+    const engine = document.getElementById('taskFilterEngine').value;
+    const status = document.getElementById('taskFilterStatus').value;
+    
+    const params = new URLSearchParams();
+    if (keyword) params.append('keyword', keyword);
+    if (engine) params.append('engine', engine);
+    if (status) params.append('status', status);
+    
+    try {{
+        const resp = await fetch('/api/tasks?' + params.toString());
+        const data = await resp.json();
+        if (data.tasks) {{
+            renderTasks(data.tasks);
+        }}
+    }} catch (err) {{
+        console.error('过滤任务失败:', err);
+    }}
+}}
+
+// 打开添加任务模态框
+function openAddTaskModal() {{
+    // 复用网站模态框，但修改标题和内容
+    document.getElementById('modalTitle').textContent = '添加任务';
+    document.getElementById('editIndex').value = -2; // -2 表示添加任务模式
+    document.getElementById('siteUrl').value = '';
+    document.getElementById('dailyVisits').value = 10;
+    currentKeywords = [];
+    renderKeywords();
+    setToggle(true);
+    document.getElementById('siteModal').classList.add('show');
+}}
+
+// 页面加载时初始化任务列表
+document.addEventListener('DOMContentLoaded', function() {{
+    loadTasks();
+}});
 </script>
 
 </body>
@@ -1327,6 +1721,37 @@ function addBaiduKeyword(idx) {{
                         logger.error(f"获取百度指数推荐失败: {e}")
                         self._send_json({'error': str(e), 'success': False, 'recommendations': []})
 
+                elif path == '/api/tasks':
+                    if not user_id:
+                        self._send_json({'error': '未登录'}, 401)
+                        return
+                    query_params = parse_qs(parsed_path.query)
+                    keyword_filter = query_params.get('keyword', [''])[0].lower()
+                    engine_filter = query_params.get('engine', [''])[0]
+                    status_filter = query_params.get('status', [''])[0]
+                    
+                    tasks = dashboard._load_tasks(user_id)
+                    
+                    # 应用过滤
+                    filtered_tasks = []
+                    for task in tasks:
+                        if keyword_filter and keyword_filter not in task.get('keyword', '').lower():
+                            continue
+                        if engine_filter and task.get('engine') != engine_filter:
+                            continue
+                        if status_filter and task.get('status') != status_filter:
+                            continue
+                        filtered_tasks.append(task)
+                    
+                    self._send_json({'tasks': filtered_tasks, 'total': len(tasks)})
+
+                elif path == '/api/task_stats':
+                    if not user_id:
+                        self._send_json({'error': '未登录'}, 401)
+                        return
+                    stats = dashboard._get_task_stats(user_id)
+                    self._send_json(stats)
+
                 else:
                     self._send_html('<h1>404 - 页面不存在</h1>', 404)
 
@@ -1411,6 +1836,121 @@ function addBaiduKeyword(idx) {{
 
                     dashboard._save_user_websites(user_id, websites)
                     self._send_json({'success': True, 'message': '保存成功'})
+
+                elif path == '/api/task/toggle':
+                    if not self._check_login():
+                        self._send_json({'error': '未登录'}, 401)
+                        return
+                    session_id = self._get_cookie('session_id')
+                    user_id = dashboard.sessions.get(session_id)
+                    if not user_id:
+                        self._send_json({'error': '未登录'}, 401)
+                        return
+                    
+                    try:
+                        data = json.loads(post_data) if isinstance(post_data, str) else params
+                        task_id = data.get('task_id') if isinstance(data, dict) else None
+                        if not task_id:
+                            self._send_json({'error': '缺少task_id参数'}, 400)
+                            return
+                        
+                        tasks = dashboard._load_tasks(user_id)
+                        for task in tasks:
+                            if task.get('task_id') == task_id:
+                                # 切换状态
+                                new_status = 'paused' if task.get('status') == 'running' else 'running'
+                                task['status'] = new_status
+                                dashboard._save_task(user_id, task)
+                                self._send_json({'success': True, 'status': new_status, 'task_id': task_id})
+                                return
+                        
+                        self._send_json({'error': '任务不存在'}, 404)
+                    except Exception as e:
+                        self._send_json({'error': str(e)}, 500)
+
+                elif path == '/api/task/batch_action':
+                    if not self._check_login():
+                        self._send_json({'error': '未登录'}, 401)
+                        return
+                    session_id = self._get_cookie('session_id')
+                    user_id = dashboard.sessions.get(session_id)
+                    if not user_id:
+                        self._send_json({'error': '未登录'}, 401)
+                        return
+                    
+                    try:
+                        data = json.loads(post_data) if isinstance(post_data, str) else params
+                        action = data.get('action') if isinstance(data, dict) else None
+                        task_ids = data.get('task_ids', []) if isinstance(data, dict) else []
+                        
+                        if not action or not task_ids:
+                            self._send_json({'error': '缺少action或task_ids参数'}, 400)
+                            return
+                        
+                        success_count = 0
+                        failed_count = 0
+                        
+                        if action == 'delete':
+                            for task_id in task_ids:
+                                if dashboard._delete_task(user_id, task_id):
+                                    success_count += 1
+                                else:
+                                    failed_count += 1
+                        else:
+                            tasks = dashboard._load_tasks(user_id)
+                            for task in tasks:
+                                if task.get('task_id') in task_ids:
+                                    if action == 'start':
+                                        task['status'] = 'running'
+                                    elif action == 'pause':
+                                        task['status'] = 'paused'
+                                    dashboard._save_task(user_id, task)
+                                    success_count += 1
+                        
+                        self._send_json({
+                            'success': True,
+                            'action': action,
+                            'success_count': success_count,
+                            'failed_count': failed_count
+                        })
+                    except Exception as e:
+                        self._send_json({'error': str(e)}, 500)
+
+                elif path == '/api/task/add':
+                    if not self._check_login():
+                        self._send_json({'error': '未登录'}, 401)
+                        return
+                    session_id = self._get_cookie('session_id')
+                    user_id = dashboard.sessions.get(session_id)
+                    if not user_id:
+                        self._send_json({'error': '未登录'}, 401)
+                        return
+                    
+                    try:
+                        data = json.loads(post_data) if isinstance(post_data, str) else params
+                        if not isinstance(data, dict):
+                            self._send_json({'error': '无效的数据格式'}, 400)
+                            return
+                        
+                        # 生成任务ID
+                        import uuid
+                        task = {
+                            'task_id': str(uuid.uuid4()),
+                            'keyword': data.get('keyword', ''),
+                            'url': data.get('url', ''),
+                            'engine': data.get('engine', 'baidu'),
+                            'initial_rank': data.get('initial_rank', 0),
+                            'current_rank': data.get('current_rank', 0),
+                            'last_check': datetime.now().strftime('%Y-%m-%d %H:%M'),
+                            'daily_optimized': 0,
+                            'total_optimized': 0,
+                            'status': 'running',
+                            'created_at': datetime.now().strftime('%Y-%m-%d %H:%M')
+                        }
+                        dashboard._save_task(user_id, task)
+                        self._send_json({'success': True, 'task': task})
+                    except Exception as e:
+                        self._send_json({'error': str(e)}, 500)
 
                 else:
                     self._send_html('<h1>404 - 页面不存在</h1>', 404)
