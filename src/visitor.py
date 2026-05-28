@@ -73,7 +73,7 @@ class WebsiteVisitor:
                 try:
                     response = await page.goto(
                         website.url,
-                        wait_until="networkidle",
+                        wait_until="domcontentloaded",
                         timeout=self.timeout
                     )
                     
