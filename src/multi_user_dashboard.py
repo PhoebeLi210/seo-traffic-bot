@@ -93,8 +93,10 @@ class MultiUserDashboard:
             "days": days
         }
 
-    def _check_rank(self, keyword: str, domain: str, engine: str) -> dict:
-        """查询指定关键词在搜索引擎中的排名"""
+    def _check_rank(self, keyword: str, domain: str, engine: str, device: str = "pc") -> dict:
+        """查询指定关键词在搜索引擎中的排名
+        device: 'pc' 或 'mobile'
+        """
         engine_urls = {
             'google': 'https://www.google.com/search?q={keyword}&num=50&hl=en',
             'baidu': 'https://www.baidu.com/s?wd={keyword}&rn=50',
@@ -106,12 +108,18 @@ class MultiUserDashboard:
 
         url_template = engine_urls.get(engine)
         if not url_template:
-            return {"engine": engine, "rank": 0, "found": False}
+            return {"engine": engine, "device": device, "rank": 0, "found": False}
 
         search_url = url_template.format(keyword=quote(keyword))
 
+        # 根据设备类型使用不同的 User-Agent
+        if device == "mobile":
+            ua = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1'
+        else:
+            ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'User-Agent': ua,
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
         }
@@ -145,13 +153,13 @@ class MultiUserDashboard:
                     break
 
             if position > 0:
-                return {"engine": engine, "rank": position, "found": True}
+                return {"engine": engine, "device": device, "rank": position, "found": True}
             else:
-                return {"engine": engine, "rank": 0, "found": False}
+                return {"engine": engine, "device": device, "rank": 0, "found": False}
 
         except Exception as e:
-            logger.error(f"排名查询失败 [{engine}]: {e}")
-            return {"engine": engine, "rank": 0, "found": False, "error": str(e)}
+            logger.error(f"排名查询失败 [{engine}/{device}]: {e}")
+            return {"engine": engine, "device": device, "rank": 0, "found": False, "error": str(e)}
 
     # ==================== 页面生成 ====================
 
@@ -607,10 +615,6 @@ class MultiUserDashboard:
                 font-size: 0.8em;
                 padding: 5px 8px;
             }}
-            .rank-result-card th:nth-child(2),
-            .rank-result-card td:nth-child(2) {{
-                display: none;
-            }}
         }}
         
         /* 超小屏幕 (< 480px) */
@@ -743,7 +747,7 @@ class MultiUserDashboard:
         <div class="action-bar">
             <div>
                 <h2>搜索引擎排名查询</h2>
-                <span class="hint">查询网站关键词在各搜索引擎中的排名</span>
+                <span class="hint">分别查询PC端和移动端的排名，结果可能不同</span>
             </div>
         </div>
         <div class="card rank-query-card">
@@ -774,6 +778,15 @@ class MultiUserDashboard:
                     </div>
                 </div>
                 <div class="rank-form-row">
+                    <div class="rank-form-group rank-engines-group">
+                        <label>查询设备</label>
+                        <div class="rank-checkboxes">
+                            <label class="rank-checkbox"><input type="checkbox" value="pc" checked> 🖥️ PC端</label>
+                            <label class="rank-checkbox"><input type="checkbox" value="mobile" checked> 📱 移动端</label>
+                        </div>
+                    </div>
+                </div>
+                <div class="rank-form-row">
                     <button class="btn btn-primary" id="rankQueryBtn" onclick="checkRank()">开始查询</button>
                 </div>
             </div>
@@ -783,7 +796,7 @@ class MultiUserDashboard:
                 <thead>
                     <tr>
                         <th>搜索引擎</th>
-                        <th>关键词</th>
+                        <th>设备</th>
                         <th class="center">排名</th>
                         <th class="center">状态</th>
                     </tr>
@@ -983,6 +996,11 @@ const engineNames = {{
     'yisou': '一搜'
 }};
 
+const deviceNames = {{
+    'pc': '🖥️ PC端',
+    'mobile': '📱 移动端'
+}};
+
 // 初始化排名查询的网站下拉框
 function initRankDropdown() {{
     const select = document.getElementById('rankDomain');
@@ -1003,33 +1021,51 @@ async function checkRank() {{
     if (!domain) {{ alert('请选择一个网站'); return; }}
     if (!keyword) {{ alert('请输入关键词'); return; }}
 
-    const checkboxes = document.querySelectorAll('.rank-checkboxes input[type="checkbox"]:checked');
-    if (checkboxes.length === 0) {{ alert('请至少选择一个搜索引擎'); return; }}
+    const engineBoxes = document.querySelectorAll('.rank-checkboxes input[type="checkbox"][value="google"],.rank-checkboxes input[type="checkbox"][value="baidu"],.rank-checkboxes input[type="checkbox"][value="bing"],.rank-checkboxes input[type="checkbox"][value="360"],.rank-checkboxes input[type="checkbox"][value="sogou"],.rank-checkboxes input[type="checkbox"][value="yisou"]:checked');
+    const deviceBoxes = document.querySelectorAll('.rank-checkboxes input[type="checkbox"][value="pc"]:checked, .rank-checkboxes input[type="checkbox"][value="mobile"]:checked');
 
-    const engines = Array.from(checkboxes).map(cb => cb.value);
+    // 用更精确的方式获取选中的引擎和设备
+    const allCheckboxes = document.querySelectorAll('.rank-checkboxes input[type="checkbox"]:checked');
+    const engines = [];
+    const devices = [];
+    allCheckboxes.forEach(cb => {{
+        const v = cb.value;
+        if (['google','baidu','bing','360','sogou','yisou'].includes(v)) engines.push(v);
+        if (['pc','mobile'].includes(v)) devices.push(v);
+    }});
+
+    if (engines.length === 0) {{ alert('请至少选择一个搜索引擎'); return; }}
+    if (devices.length === 0) {{ alert('请至少选择一种设备类型'); return; }}
+
     const tbody = document.getElementById('rankResultBody');
     const btn = document.getElementById('rankQueryBtn');
 
     btn.disabled = true;
     btn.textContent = '查询中...';
 
-    // 先生成所有行的 loading 状态
+    // 生成所有查询任务 (引擎 x 设备)
     let rows = '';
+    let taskId = 0;
+    const tasks = [];
     engines.forEach(eng => {{
-        rows += `<tr id="rank-row-${{eng}}">
-            <td>${{engineNames[eng] || eng}}</td>
-            <td>${{keyword}}</td>
-            <td class="center rank-loading">查询中...</td>
-            <td class="center rank-loading">查询中...</td>
-        </tr>`;
+        devices.forEach(dev => {{
+            const id = 'rank-row-' + taskId++;
+            tasks.push({{id, eng, dev}});
+            rows += `<tr id="${{id}}">
+                <td>${{engineNames[eng] || eng}}</td>
+                <td>${{deviceNames[dev] || dev}}</td>
+                <td class="center rank-loading">查询中...</td>
+                <td class="center rank-loading">查询中...</td>
+            </tr>`;
+        }});
     }});
     tbody.innerHTML = rows;
 
     // 逐个查询
-    for (const eng of engines) {{
-        const row = document.getElementById('rank-row-' + eng);
+    for (const task of tasks) {{
+        const row = document.getElementById(task.id);
         try {{
-            const resp = await fetch(`/api/rank?engine=${{encodeURIComponent(eng)}}&keyword=${{encodeURIComponent(keyword)}}&domain=${{encodeURIComponent(domain)}}`);
+            const resp = await fetch(`/api/rank?engine=${{encodeURIComponent(task.eng)}}&keyword=${{encodeURIComponent(keyword)}}&domain=${{encodeURIComponent(domain)}}&device=${{encodeURIComponent(task.dev)}}`);
             const data = await resp.json();
             if (data.found) {{
                 row.cells[2].innerHTML = `<span class="rank-found">第 ${{data.rank}} 名</span>`;
@@ -1127,10 +1163,11 @@ document.addEventListener('DOMContentLoaded', function() {{
                     engine = query_params.get('engine', [''])[0]
                     keyword = query_params.get('keyword', [''])[0]
                     domain = query_params.get('domain', [''])[0]
+                    device = query_params.get('device', ['pc'])[0]
                     if not engine or not keyword or not domain:
                         self._send_json({'error': '缺少必要参数 (engine, keyword, domain)'}, 400)
                         return
-                    result = dashboard._check_rank(keyword, domain, engine)
+                    result = dashboard._check_rank(keyword, domain, engine, device)
                     self._send_json(result)
 
                 else:
