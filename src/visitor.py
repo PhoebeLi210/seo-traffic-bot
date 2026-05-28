@@ -58,49 +58,58 @@ class WebsiteVisitor:
                         '--disable-blink-features=AutomationControlled',
                         '--disable-web-security',
                         '--disable-features=IsolateOrigins,site-per-process',
+                        '--no-sandbox',
+                        '--disable-dev-shm-usage',
+                        '--disable-gpu',
+                        '--disable-extensions',
+                        '--disable-plugins',
                     ]
                 )
+            
+            # 创建反检测上下文
+            context = await stealth_enhancer.create_stealth_context(browser, proxy)
+            
+            # 创建新页面
+            page = await context.new_page()
+            
+            # 访问目标网站
+            logger.info(f"🌐 正在访问: {website.url}")
+            
+            try:
+                response = await page.goto(
+                    website.url,
+                    wait_until="domcontentloaded",
+                    timeout=self.timeout
+                )
                 
-                # 创建反检测上下文
-                context = await stealth_enhancer.create_stealth_context(browser, proxy)
+                if response:
+                    status = response.status
+                    logger.info(f"✅ 页面加载成功，状态码: {status}")
+                    result["pages_visited"] = 1
+                else:
+                    logger.warning("⚠️ 页面加载无响应")
                 
-                # 创建新页面
-                page = await context.new_page()
+                # 模拟用户行为
+                await behavior_simulator.simulate_browsing(page)
                 
-                # 访问目标网站
-                logger.info(f"🌐 正在访问: {website.url}")
+                result["success"] = True
                 
-                try:
-                    response = await page.goto(
-                        website.url,
-                        wait_until="domcontentloaded",
-                        timeout=self.timeout
-                    )
-                    
-                    if response:
-                        status = response.status
-                        logger.info(f"✅ 页面加载成功，状态码: {status}")
-                        result["pages_visited"] = 1
-                    else:
-                        logger.warning("⚠️ 页面加载无响应")
-                    
-                    # 模拟用户行为
-                    await behavior_simulator.simulate_browsing(page)
-                    
-                    result["success"] = True
-                    
-                except Exception as e:
-                    logger.error(f"❌ 页面访问失败: {e}")
-                    result["error"] = str(e)
-                
-                # 清理资源
-                if context:
-                    await context.close()
-                if browser:
-                    await browser.close()
+            except Exception as e:
+                import traceback
+                logger.error(f"❌ 页面访问失败: {e}")
+                logger.error(f"详细错误: {traceback.format_exc()}")
+                result["error"] = str(e)
+            
+            # 清理资源
+            if context:
+                await context.close()
+            if browser:
+                await browser.close()
         
         except Exception as e:
+            import traceback
             logger.error(f"❌ 访问过程出错: {e}")
+            logger.error(f"详细错误: {traceback.format_exc()}")
             result["error"] = str(e)
         
         finally:
