@@ -56,6 +56,14 @@ class MultiUserServer:
                 if all_websites:
                     logger.info(f"🌐 本轮共 {len(all_websites)} 个网站需要访问")
 
+                    # 先检查代理池是否有可用代理
+                    proxy_stats = proxy_manager.get_stats()
+                    if not proxy_stats.get('free_proxy_available', False):
+                        logger.warning("⚠️ 代理池无可用代理，等待下一轮...")
+                        # 等待后继续，不进行访问
+                        await asyncio.sleep(60)
+                        continue
+
                     # 访问所有网站
                     for site_config in all_websites:
                         user_id = site_config.get('_user_id')

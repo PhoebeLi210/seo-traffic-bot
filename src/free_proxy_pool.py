@@ -38,18 +38,42 @@ class Proxy:
 class FreeProxyPool:
     """免费代理池 - 抓取、验证、轮换免费代理"""
 
-    # 免费代理源列表
+    # 免费代理源列表（国内可用）
     PROXY_SOURCES = [
         {
             'name': 'xicidaili',
             'url': 'https://www.xicidaili.com/wn/',
             'parser': 'html',
-            'check_interval': 300,  # 5分钟刷新一次
+            'check_interval': 300,
+        },
+        {
+            'name': 'xicidaili_http',
+            'url': 'https://www.xicidaili.com/wt/',
+            'parser': 'html',
+            'check_interval': 300,
         },
         {
             'name': 'kxdaili',
             'url': 'https://www.kxdaili.com/dailiip/1/',
             'parser': 'html',
+            'check_interval': 300,
+        },
+        {
+            'name': 'kxdaili2',
+            'url': 'https://www.kxdaili.com/dailiip/2/',
+            'parser': 'html',
+            'check_interval': 300,
+        },
+        {
+            'name': 'iphai',
+            'url': 'https://www.iphai.com/',
+            'parser': 'html',
+            'check_interval': 300,
+        },
+        {
+            'name': 'proxy_list',
+            'url': 'https://proxy-list.org/chinese/index.php?type=HTTP&page=1',
+            'parser': 'base64',
             'check_interval': 300,
         },
     ]
@@ -60,12 +84,14 @@ class FreeProxyPool:
         self.test_timeout = self.config.get('test_timeout', 5)
         self.max_proxies = self.config.get('max_proxies', 100)
         self.validate_before_use = self.config.get('validate_before_use', True)
+        self.require_proxy = self.config.get('require_proxy', True)  # 是否必须使用代理
 
         self._proxies: List[Proxy] = []
         self._lock = threading.Lock()
         self._last_fetch = 0
         self._fetch_interval = 300  # 5分钟抓取一次
         self._current_index = 0
+        self._last_used_index = -1  # 记录上一个使用的代理索引
 
         # 统计
         self.stats = {
@@ -73,6 +99,7 @@ class FreeProxyPool:
             'valid_count': 0,
             'used_count': 0,
             'fail_count': 0,
+            'no_proxy_available': 0,
         }
 
     async def fetch_from_source(self, source: Dict) -> List[Proxy]:
@@ -80,50 +107,54 @@ class FreeProxyPool:
         proxies = []
         try:
             timeout = aiohttp.ClientTimeout(total=30)
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+            }
             async with aiohttp.ClientSession(timeout=timeout) as session:
-                headers = {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                }
                 async with session.get(source['url'], headers=headers, ssl=False) as resp:
                     if resp.status == 200:
                         html = await resp.text()
 
                         if source['parser'] == 'html':
-                            # 解析HTML表格
                             proxies = self._parse_html_proxies(html)
                         elif source['parser'] == 'text':
-                            # 解析纯文本
                             proxies = self._parse_text_proxies(html)
+                        elif source['parser'] == 'base64':
+                            proxies = self._parse_base64_proxies(html)
 
                         logger.info(f"从 {source['name']} 获取到 {len(proxies)} 个代理")
                     else:
-                        logger.warning(f"代理源 {source['name']} 返回状态码: {resp.status}")
+                        logger.debug(f"代理源 {source['name']} 返回状态码: {resp.status}")
         except Exception as e:
-            logger.warning(f"从 {source['name']} 抓取失败: {e}")
+            logger.debug(f"从 {source['name']} 抓取失败: {e}")
 
         return proxies
 
     def _parse_html_proxies(self, html: str) -> List[Proxy]:
         """解析HTML表格格式的代理"""
         proxies = []
-        # 匹配 IP 和端口
         ip_pattern = r'<td>(\d+\.\d+\.\d+\.\d+)</td>'
         port_pattern = r'<td>(\d+)</td>'
 
-        ips = re.findall(ip_pattern, html)
-        ports = re.findall(port_pattern, html)
+        try:
+            ips = re.findall(ip_pattern, html)
+            ports = re.findall(port_pattern, html)
 
-        for i, ip in enumerate(ips[:50]):  # 限制数量
-            if i < len(ports):
-                try:
-                    proxy = Proxy(
-                        ip=ip,
-                        port=int(ports[i]),
-                        last_check=time.time()
-                    )
-                    proxies.append(proxy)
-                except:
-                    pass
+            for i, ip in enumerate(ips[:50]):
+                if i < len(ports):
+                    try:
+                        proxy = Proxy(
+                            ip=ip,
+                            port=int(ports[i]),
+                            last_check=time.time()
+                        )
+                        proxies.append(proxy)
+                    except:
+                        pass
+        except:
+            pass
 
         return proxies
 
@@ -149,6 +180,31 @@ class FreeProxyPool:
 
         return proxies
 
+    def _parse_base64_proxies(self, text: str) -> List[Proxy]:
+        """解析Base64编码的代理"""
+        proxies = []
+        try:
+            import base64
+            # 查找 Base64 编码的代理
+            pattern = r'Base64\.decode\("([^"]+)"\)'
+            matches = re.findall(pattern, text)
+            for match in matches:
+                try:
+                    decoded = base64.b64decode(match).decode('utf-8')
+                    parts = decoded.split(':')
+                    if len(parts) >= 2:
+                        proxy = Proxy(
+                            ip=parts[0],
+                            port=int(parts[1]),
+                            last_check=time.time()
+                        )
+                        proxies.append(proxy)
+                except:
+                    pass
+        except:
+            pass
+        return proxies
+
     async def validate_proxy(self, proxy: Proxy) -> bool:
         """验证单个代理是否可用"""
         try:
@@ -157,7 +213,7 @@ class FreeProxyPool:
 
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 start = time.time()
-                async with session.get(self.test_url, proxy=proxy_url, ssl=False) as resp:
+                async with session.get(self.test_url, proxy=proxy_url, ssl=False, timeout=self.test_timeout) as resp:
                     elapsed = time.time() - start
                     if resp.status == 200:
                         proxy.speed = elapsed
@@ -197,7 +253,7 @@ class FreeProxyPool:
 
         # 验证代理（并发但限制数量）
         validated = []
-        semaphore = asyncio.Semaphore(20)  # 最多20个并发
+        semaphore = asyncio.Semaphore(30)  # 最多30个并发
 
         async def validate_with_limit(proxy):
             async with semaphore:
@@ -205,7 +261,7 @@ class FreeProxyPool:
                     return proxy
                 return None
 
-        tasks = [validate_with_limit(p) for p in unique_proxies[:50]]  # 最多验证50个
+        tasks = [validate_with_limit(p) for p in unique_proxies[:80]]
         results = await asyncio.gather(*tasks)
 
         for result in results:
@@ -219,55 +275,67 @@ class FreeProxyPool:
             self.stats['valid_count'] = len(validated)
 
         logger.info(f"✅ 验证完成，{len(validated)}/{len(unique_proxies)} 个代理可用")
+        logger.info(f"📊 代理池当前有 {len(validated)} 个可用代理可轮换")
 
         self._last_fetch = time.time()
         return len(validated)
 
     async def get_proxy(self) -> Optional[Dict]:
-        """获取一个可用代理"""
-        # 检查是否需要刷新
-        if time.time() - self._last_fetch > self._fetch_interval:
-            await self.fetch_and_validate()
-
+        """获取一个可用代理（轮换策略）"""
         with self._lock:
             if not self._proxies:
+                self.stats['no_proxy_available'] += 1
+                logger.warning("⚠️ 代理池为空，尝试刷新...")
                 return None
 
-            # 轮询获取
-            self._current_index = (self._current_index + 1) % len(self._proxies)
-            proxy = self._proxies[self._current_index]
+            # 轮换策略：尽量使用不同的代理
+            if len(self._proxies) == 1:
+                proxy = self._proxies[0]
+            else:
+                # 尝试找到一个没用过的或失败次数少的
+                best_proxy = None
+                for _ in range(len(self._proxies)):
+                    self._current_index = (self._current_index + 1) % len(self._proxies)
+                    proxy = self._proxies[self._current_index]
+                    if proxy.is_valid and self._current_index != self._last_used_index:
+                        best_proxy = proxy
+                        break
+                
+                if best_proxy is None:
+                    proxy = self._proxies[0]
+                else:
+                    proxy = best_proxy
 
-            # 检查代理是否有效
-            if not proxy.is_valid:
-                # 移除无效代理
-                self._proxies.remove(proxy)
-                self.stats['fail_count'] += 1
-                return self.get_proxy()  # 递归获取下一个
-
-        # 验证代理（如果需要）
-        if self.validate_before_use:
-            if not await self.validate_proxy(proxy):
-                with self._lock:
-                    if proxy in self._proxies:
-                        self._proxies.remove(proxy)
-                return self.get_proxy()
-
-        self.stats['used_count'] += 1
-        return {
-            'server': f"http://{proxy.address}",
-            'ip': proxy.ip,
-            'port': proxy.port
-        }
+        # 验证代理
+        if await self.validate_proxy(proxy):
+            self._last_used_index = self._current_index
+            self.stats['used_count'] += 1
+            return {
+                'server': f"http://{proxy.address}",
+                'ip': proxy.ip,
+                'port': proxy.port
+            }
+        else:
+            # 代理失效，移除
+            with self._lock:
+                if proxy in self._proxies:
+                    self._proxies.remove(proxy)
+                    self.stats['fail_count'] += 1
+            logger.warning(f"⚠️ 代理 {proxy.address} 失效，已移除")
+            # 递归获取下一个
+            return await self.get_proxy()
 
     def get_stats(self) -> Dict:
         """获取代理池统计信息"""
         with self._lock:
-            return {
-                **self.stats,
-                'pool_size': len(self._proxies),
-                'last_fetch': self._last_fetch,
-                'last_fetch_time': time.strftime('%H:%M:%S', time.localtime(self._last_fetch)) if self._last_fetch else '从未刷新'
-            }
+            pool_count = len(self._proxies)
+        return {
+            **self.stats,
+            'pool_size': pool_count,
+            'last_fetch': self._last_fetch,
+            'last_fetch_time': time.strftime('%H:%M:%S', time.localtime(self._last_fetch)) if self._last_fetch else '从未刷新',
+            'can_proceed': pool_count > 0
+        }
 
     async def start_background_refresh(self, interval: int = 300):
         """启动后台定时刷新"""
