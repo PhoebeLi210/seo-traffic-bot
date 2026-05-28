@@ -17,6 +17,7 @@ import threading
 from loguru import logger
 
 from .user_manager import user_manager, User
+from .gsc_keyword_recommender import gsc_recommender
 
 
 class MultiUserDashboard:
@@ -832,6 +833,13 @@ class MultiUserDashboard:
                     <input type="text" id="kwInput" placeholder="输入关键词后按回车或点击添加">
                     <button type="button" class="btn btn-gray" onclick="addKeyword()">添加</button>
                 </div>
+                <div class="kw-recommend-row" style="margin-top: 10px;">
+                    <button type="button" class="btn btn-success" id="recommendBtn" onclick="fetchRecommendedKeywords()">
+                        🔍 获取GSC推荐关键词
+                    </button>
+                    <span class="hint" style="margin-left: 8px; font-size: 0.8em;">从Google Search Console获取排名4-20位的高潜力关键词</span>
+                </div>
+                <div id="recommendStatus" style="margin-top: 8px; font-size: 0.85em; color: #667eea;"></div>
             </div>
             <div class="form-group">
                 <label>每日访问次数</label>
@@ -1088,6 +1096,51 @@ async function checkRank() {{
 document.addEventListener('DOMContentLoaded', function() {{
     initRankDropdown();
 }});
+
+// ==================== 获取GSC推荐关键词 ====================
+
+async function fetchRecommendedKeywords() {{
+    const url = document.getElementById('siteUrl').value.trim();
+    const btn = document.getElementById('recommendBtn');
+    const status = document.getElementById('recommendStatus');
+    
+    if (!url) {{
+        status.innerHTML = '<span style="color: #ef4444;">请先输入网站地址</span>';
+        return;
+    }}
+    
+    btn.disabled = true;
+    btn.textContent = '获取中...';
+    status.innerHTML = '<span style="color: #667eea;">正在从Google Search Console获取推荐关键词...</span>';
+    
+    try {{
+        const resp = await fetch(`/api/recommend_keywords?url=${{encodeURIComponent(url)}}`);
+        const data = await resp.json();
+        
+        if (data.success && data.keywords && data.keywords.length > 0) {{
+            // 将推荐关键词添加到当前关键词列表
+            let added = 0;
+            data.keywords.forEach(kw => {{
+                if (!currentKeywords.includes(kw)) {{
+                    currentKeywords.push(kw);
+                    added++;
+                }}
+            }});
+            
+            renderKeywords();
+            status.innerHTML = `<span style="color: #10b981;">✓ 成功添加 ${{added}} 个推荐关键词${{data.from_gsc ? '（来自GSC真实数据）' : '（模拟数据，配置GSC API后可获取真实数据）'}}</span>`;
+        }} else if (data.keywords && data.keywords.length === 0) {{
+            status.innerHTML = '<span style="color: #f59e0b;">未找到推荐关键词，请检查网站是否已添加到Google Search Console</span>';
+        }} else {{
+            status.innerHTML = `<span style="color: #ef4444;">获取失败: ${{data.error || '未知错误'}}</span>`;
+        }}
+    }} catch (err) {{
+        status.innerHTML = `<span style="color: #ef4444;">网络错误: ${{err.message}}</span>`;
+    }}
+    
+    btn.disabled = false;
+    btn.textContent = '🔍 获取GSC推荐关键词';
+}}
 </script>
 
 </body>
@@ -1169,6 +1222,33 @@ document.addEventListener('DOMContentLoaded', function() {{
                         return
                     result = dashboard._check_rank(keyword, domain, engine, device)
                     self._send_json(result)
+
+                elif path == '/api/recommend_keywords':
+                    if not user_id:
+                        self._send_json({'error': '未登录'}, 401)
+                        return
+                    query_params = parse_qs(parsed_path.query)
+                    url = query_params.get('url', [''])[0]
+                    if not url:
+                        self._send_json({'error': '缺少网站URL参数'}, 400)
+                        return
+                    
+                    try:
+                        # 检查GSC凭证状态
+                        cred_status = gsc_recommender.check_credentials_setup()
+                        
+                        # 获取推荐关键词
+                        keywords = gsc_recommender.get_recommended_keywords_for_site(url, limit=10)
+                        
+                        self._send_json({
+                            'success': True,
+                            'keywords': keywords,
+                            'from_gsc': cred_status['configured'],
+                            'message': '获取成功' if keywords else '未找到推荐关键词'
+                        })
+                    except Exception as e:
+                        logger.error(f"获取推荐关键词失败: {e}")
+                        self._send_json({'error': str(e), 'success': False, 'keywords': []})
 
                 else:
                     self._send_html('<h1>404 - 页面不存在</h1>', 404)
