@@ -18,6 +18,7 @@ from loguru import logger
 
 from .user_manager import user_manager, User
 from .gsc_keyword_recommender import gsc_recommender
+from .baidu_index_recommender import baidu_recommender, KeywordRecommendation
 
 
 class MultiUserDashboard:
@@ -839,7 +840,30 @@ class MultiUserDashboard:
                     </button>
                     <span class="hint" style="margin-left: 8px; font-size: 0.8em;">从Google Search Console获取排名4-20位的高潜力关键词</span>
                 </div>
+                <div class="kw-recommend-row" style="margin-top: 8px;">
+                    <button type="button" class="btn btn-primary" id="baiduRecommendBtn" onclick="fetchBaiduRecommendations()">
+                        📊 百度指数关键词推荐
+                    </button>
+                    <span class="hint" style="margin-left: 8px; font-size: 0.8em;">基于行业词库和搜索热度分析推荐关键词</span>
+                </div>
                 <div id="recommendStatus" style="margin-top: 8px; font-size: 0.85em; color: #667eea;"></div>
+                <div id="baiduRecommendResult" style="margin-top: 12px; display: none;">
+                    <div style="background: #f8fafc; border-radius: 8px; padding: 12px; max-height: 300px; overflow-y: auto;">
+                        <table style="width: 100%; font-size: 0.85em;">
+                            <thead>
+                                <tr style="border-bottom: 1px solid #e2e8f0;">
+                                    <th style="text-align: left; padding: 6px;">关键词</th>
+                                    <th style="text-align: center; padding: 6px;">类别</th>
+                                    <th style="text-align: center; padding: 6px;">搜索量</th>
+                                    <th style="text-align: center; padding: 6px;">竞争</th>
+                                    <th style="text-align: center; padding: 6px;">趋势</th>
+                                    <th style="text-align: center; padding: 6px;">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="baiduRecommendTable"></tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
             <div class="form-group">
                 <label>每日访问次数</label>
@@ -1141,6 +1165,91 @@ async function fetchRecommendedKeywords() {{
     btn.disabled = false;
     btn.textContent = '🔍 获取GSC推荐关键词';
 }}
+
+// ==================== 百度指数关键词推荐 ====================
+
+let baiduRecommendations = [];
+
+async function fetchBaiduRecommendations() {{
+    const url = document.getElementById('siteUrl').value.trim();
+    const btn = document.getElementById('baiduRecommendBtn');
+    const status = document.getElementById('recommendStatus');
+    const resultDiv = document.getElementById('baiduRecommendResult');
+    
+    if (!url) {{
+        status.innerHTML = '<span style="color: #ef4444;">请先输入网站地址</span>';
+        return;
+    }}
+    
+    btn.disabled = true;
+    btn.textContent = '分析中...';
+    status.innerHTML = '<span style="color: #667eea;">正在基于行业词库分析推荐关键词...</span>';
+    resultDiv.style.display = 'none';
+    
+    try {{
+        const existingKws = currentKeywords.join(',');
+        const resp = await fetch(`/api/baidu_recommend?url=${{encodeURIComponent(url)}}&existing=${{encodeURIComponent(existingKws)}}`);
+        const data = await resp.json();
+        
+        if (data.success && data.recommendations && data.recommendations.length > 0) {{
+            baiduRecommendations = data.recommendations;
+            renderBaiduRecommendations();
+            resultDiv.style.display = 'block';
+            status.innerHTML = `<span style="color: #10b981;">✓ 找到 ${{data.recommendations.length}} 个推荐关键词，请选择添加</span>`;
+        }} else {{
+            status.innerHTML = '<span style="color: #f59e0b;">未找到推荐关键词，请尝试手动输入</span>';
+        }}
+    }} catch (err) {{
+        status.innerHTML = `<span style="color: #ef4444;">网络错误: ${{err.message}}</span>`;
+    }}
+    
+    btn.disabled = false;
+    btn.textContent = '📊 百度指数关键词推荐';
+}}
+
+function renderBaiduRecommendations() {{
+    const tbody = document.getElementById('baiduRecommendTable');
+    let html = '';
+    
+    baiduRecommendations.forEach((rec, idx) => {{
+        const trendColor = rec.trend === '上升' ? '#10b981' : (rec.trend === '下降' ? '#ef4444' : '#f59e0b');
+        const volColor = rec.search_volume === '高' ? '#ef4444' : (rec.search_volume === '中' ? '#f59e0b' : '#10b981');
+        const compColor = rec.competition === '高' ? '#ef4444' : (rec.competition === '中' ? '#f59e0b' : '#10b981');
+        
+        html += `<tr style="border-bottom: 1px solid #f1f5f9;">
+            <td style="padding: 8px; font-weight: 500;">${{rec.keyword}}</td>
+            <td style="padding: 8px; text-align: center;"><span class="badge" style="background: #eef2ff; color: #667eea;">${{rec.category}}</span></td>
+            <td style="padding: 8px; text-align: center; color: ${{volColor}}; font-weight: 600;">${{rec.search_volume}}</td>
+            <td style="padding: 8px; text-align: center; color: ${{compColor}};">${{rec.competition}}</td>
+            <td style="padding: 8px; text-align: center; color: ${{trendColor}};">${{rec.trend}}</td>
+            <td style="padding: 8px; text-align: center;">
+                <button type="button" class="btn btn-sm btn-primary" onclick="addBaiduKeyword(${{idx}})">添加</button>
+            </td>
+        </tr>
+        <tr>
+            <td colspan="6" style="padding: 0 8px 8px 8px; font-size: 0.8em; color: #888;">${{rec.reason}}</td>
+        </tr>`;
+    }});
+    
+    tbody.innerHTML = html;
+}}
+
+function addBaiduKeyword(idx) {{
+    const rec = baiduRecommendations[idx];
+    if (!currentKeywords.includes(rec.keyword)) {{
+        currentKeywords.push(rec.keyword);
+        renderKeywords();
+        
+        // 标记为已添加
+        const btn = document.querySelectorAll('#baiduRecommendTable button')[idx];
+        if (btn) {{
+            btn.textContent = '已添加';
+            btn.disabled = true;
+            btn.classList.remove('btn-primary');
+            btn.classList.add('btn-gray');
+        }}
+    }}
+}}
 </script>
 
 </body>
@@ -1249,6 +1358,51 @@ async function fetchRecommendedKeywords() {{
                     except Exception as e:
                         logger.error(f"获取推荐关键词失败: {e}")
                         self._send_json({'error': str(e), 'success': False, 'keywords': []})
+
+                elif path == '/api/baidu_recommend':
+                    if not user_id:
+                        self._send_json({'error': '未登录'}, 401)
+                        return
+                    query_params = parse_qs(parsed_path.query)
+                    url = query_params.get('url', [''])[0]
+                    existing = query_params.get('existing', [''])[0]
+                    
+                    if not url:
+                        self._send_json({'error': '缺少网站URL参数'}, 400)
+                        return
+                    
+                    try:
+                        # 解析已有关键词
+                        existing_keywords = [kw.strip() for kw in existing.split(',') if kw.strip()]
+                        
+                        # 获取百度指数推荐
+                        recommendations = baidu_recommender.get_recommendations(
+                            url=url,
+                            existing_keywords=existing_keywords,
+                            limit=15
+                        )
+                        
+                        # 转换为字典列表
+                        recs_data = []
+                        for rec in recommendations:
+                            recs_data.append({
+                                'keyword': rec.keyword,
+                                'category': rec.category,
+                                'search_volume': rec.search_volume,
+                                'competition': rec.competition,
+                                'trend': rec.trend,
+                                'relevance_score': rec.relevance_score,
+                                'reason': rec.reason
+                            })
+                        
+                        self._send_json({
+                            'success': True,
+                            'recommendations': recs_data,
+                            'message': f'找到 {len(recs_data)} 个推荐关键词'
+                        })
+                    except Exception as e:
+                        logger.error(f"获取百度指数推荐失败: {e}")
+                        self._send_json({'error': str(e), 'success': False, 'recommendations': []})
 
                 else:
                     self._send_html('<h1>404 - 页面不存在</h1>', 404)
