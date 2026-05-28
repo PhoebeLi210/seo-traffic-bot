@@ -94,6 +94,55 @@ class MultiUserDashboard:
             "days": days
         }
 
+    def _get_trend_data(self, user_id: str, days: int = 7, metric: str = 'visits') -> Dict:
+        """获取指定时间范围和指标的趋势数据
+        
+        Args:
+            user_id: 用户ID
+            days: 天数 (7, 30, 90)
+            metric: 指标类型 ('visits', 'success_rate', 'rank')
+        
+        Returns:
+            {'labels': ['日期1', '日期2', ...], 'data': [值1, 值2, ...]}
+        """
+        stats_dir = self._get_user_stats_dir(user_id)
+        labels = []
+        data = []
+        
+        # 从最近一天往前遍历
+        for i in range(days - 1, -1, -1):
+            target_date = date.today() - timedelta(days=i)
+            labels.append(target_date.strftime('%m-%d'))
+            
+            stats_file = stats_dir / f"{target_date.isoformat()}.json"
+            if stats_file.exists():
+                try:
+                    with open(stats_file, 'r', encoding='utf-8') as f:
+                        file_data = json.load(f)
+                    
+                    if metric == 'visits':
+                        # 访问量
+                        value = file_data.get("total_visits", 0)
+                    elif metric == 'success_rate':
+                        # 成功率
+                        total = file_data.get("total_visits", 0)
+                        success = file_data.get("successful_visits", 0)
+                        value = (success / total * 100) if total > 0 else 0
+                    elif metric == 'rank':
+                        # 排名变化 - 从任务数据计算平均排名变化
+                        value = 0
+                        # 这里简化处理，返回0，实际可以从任务统计中计算
+                    else:
+                        value = 0
+                    
+                    data.append(value)
+                except Exception:
+                    data.append(0)
+            else:
+                data.append(0)
+        
+        return {'labels': labels, 'data': data}
+
     def _get_user_tasks_file(self, user_id: str) -> Path:
         """获取用户任务文件路径"""
         return user_manager.get_user_data_dir(user_id) / "tasks.json"
@@ -421,6 +470,7 @@ class MultiUserDashboard:
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SEO Traffic Bot - 控制面板</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
         body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -714,6 +764,26 @@ class MultiUserDashboard:
         .task-table td {{
             padding: 10px 8px;
         }}
+
+        /* 趋势图表按钮样式 */
+        .trend-time-btn, .trend-metric-btn {{
+            background: transparent;
+            color: #666;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 0.85em;
+            cursor: pointer;
+            transition: all 0.2s;
+        }}
+        .trend-time-btn:hover, .trend-metric-btn:hover {{
+            background: rgba(102, 126, 234, 0.1);
+            color: #667eea;
+        }}
+        .trend-time-btn.active, .trend-metric-btn.active {{
+            background: #667eea;
+            color: white;
+        }}
         
         /* 任务列表移动端响应式 - 隐藏部分列 */
         @media (max-width: 768px) {{
@@ -798,6 +868,30 @@ class MultiUserDashboard:
         <div class="stat-card">
             <div class="label">成功率</div>
             <div class="value">{stats['success_rate']:.1f}%</div>
+        </div>
+    </div>
+
+    <!-- 趋势图表 -->
+    <div class="card" style="margin-bottom: 25px; padding: 20px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
+            <h3 style="font-size: 1.1em; color: #333; margin: 0;">📈 访问趋势</h3>
+            <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center;">
+                <!-- 时间范围选择器 -->
+                <div style="display: flex; gap: 4px; background: #f0f2f5; padding: 4px; border-radius: 8px;">
+                    <button class="btn btn-sm trend-time-btn active" data-days="7" onclick="updateTrendChart(7, currentTrendMetric)">近7天</button>
+                    <button class="btn btn-sm trend-time-btn" data-days="30" onclick="updateTrendChart(30, currentTrendMetric)">近30天</button>
+                    <button class="btn btn-sm trend-time-btn" data-days="90" onclick="updateTrendChart(90, currentTrendMetric)">近90天</button>
+                </div>
+                <!-- 图表类型切换 -->
+                <div style="display: flex; gap: 4px; background: #f0f2f5; padding: 4px; border-radius: 8px;">
+                    <button class="btn btn-sm trend-metric-btn active" data-metric="visits" onclick="updateTrendChart(currentTrendDays, 'visits')">访问量</button>
+                    <button class="btn btn-sm trend-metric-btn" data-metric="success_rate" onclick="updateTrendChart(currentTrendDays, 'success_rate')">成功率</button>
+                    <button class="btn btn-sm trend-metric-btn" data-metric="rank" onclick="updateTrendChart(currentTrendDays, 'rank')">排名变化</button>
+                </div>
+            </div>
+        </div>
+        <div style="position: relative; height: 300px; width: 100%;">
+            <canvas id="trendChart"></canvas>
         </div>
     </div>
 
@@ -1206,6 +1300,154 @@ function saveToServer() {{
     }}).catch(err => alert('网络错误: ' + err));
 }}
 
+// ==================== 趋势图表 ====================
+
+let trendChart = null;
+let currentTrendDays = 7;
+let currentTrendMetric = 'visits';
+
+// 指标名称映射
+const metricNames = {{
+    'visits': '访问量',
+    'success_rate': '成功率(%)',
+    'rank': '排名变化'
+}};
+
+// 初始化趋势图表
+function initTrendChart() {{
+    const ctx = document.getElementById('trendChart');
+    if (!ctx) return;
+    
+    // 创建渐变填充
+    const gradient = ctx.getContext('2d').createLinearGradient(0, 0, 0, 300);
+    gradient.addColorStop(0, 'rgba(102, 126, 234, 0.3)');
+    gradient.addColorStop(1, 'rgba(102, 126, 234, 0.0)');
+    
+    trendChart = new Chart(ctx, {{
+        type: 'line',
+        data: {{
+            labels: [],
+            datasets: [{{
+                label: metricNames[currentTrendMetric],
+                data: [],
+                borderColor: '#667eea',
+                backgroundColor: gradient,
+                borderWidth: 2,
+                fill: true,
+                tension: 0.4,
+                pointRadius: 4,
+                pointBackgroundColor: '#667eea',
+                pointBorderColor: '#fff',
+                pointBorderWidth: 2,
+                pointHoverRadius: 6
+            }}]
+        }},
+        options: {{
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {{
+                legend: {{
+                    display: true,
+                    position: 'top'
+                }},
+                tooltip: {{
+                    mode: 'index',
+                    intersect: false,
+                    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                    titleColor: '#fff',
+                    bodyColor: '#fff',
+                    borderColor: '#667eea',
+                    borderWidth: 1,
+                    cornerRadius: 8,
+                    displayColors: false
+                }}
+            }},
+            scales: {{
+                x: {{
+                    grid: {{
+                        display: false
+                    }},
+                    ticks: {{
+                        color: '#888',
+                        font: {{
+                            size: 11
+                        }}
+                    }}
+                }},
+                y: {{
+                    beginAtZero: true,
+                    grid: {{
+                        color: 'rgba(0, 0, 0, 0.05)'
+                    }},
+                    ticks: {{
+                        color: '#888',
+                        font: {{
+                            size: 11
+                        }}
+                    }}
+                }}
+            }},
+            interaction: {{
+                mode: 'nearest',
+                axis: 'x',
+                intersect: false
+            }}
+        }}
+    }});
+    
+    // 加载初始数据
+    loadTrendData();
+}}
+
+// 更新图表
+async function updateTrendChart(days, metric) {{
+    currentTrendDays = days;
+    currentTrendMetric = metric;
+    
+    // 更新按钮状态
+    document.querySelectorAll('.trend-time-btn').forEach(btn => {{
+        btn.classList.toggle('active', parseInt(btn.dataset.days) === days);
+    }});
+    document.querySelectorAll('.trend-metric-btn').forEach(btn => {{
+        btn.classList.toggle('active', btn.dataset.metric === metric);
+    }});
+    
+    // 加载新数据
+    await loadTrendData();
+}}
+
+// 从API加载趋势数据
+async function loadTrendData() {{
+    if (!trendChart) return;
+    
+    try {{
+        const resp = await fetch(`/api/trend_data?days=${{currentTrendDays}}&metric=${{currentTrendMetric}}`);
+        const data = await resp.json();
+        
+        if (data.labels && data.data) {{
+            // 更新图表数据
+            trendChart.data.labels = data.labels;
+            trendChart.data.datasets[0].data = data.data;
+            trendChart.data.datasets[0].label = metricNames[currentTrendMetric];
+            
+            // 根据指标调整Y轴
+            if (currentTrendMetric === 'success_rate') {{
+                trendChart.options.scales.y.max = 100;
+                trendChart.options.scales.y.ticks.callback = function(value) {{
+                    return value + '%';
+                }};
+            }} else {{
+                delete trendChart.options.scales.y.max;
+                trendChart.options.scales.y.ticks.callback = undefined;
+            }}
+            
+            trendChart.update();
+        }}
+    }} catch (err) {{
+        console.error('加载趋势数据失败:', err);
+    }}
+}}
+
 // ==================== 排名查询 ====================
 
 const engineNames = {{
@@ -1305,9 +1547,10 @@ async function checkRank() {{
     btn.textContent = '开始查询';
 }}
 
-// 页面加载时初始化排名下拉框
+// 页面加载时初始化排名下拉框和趋势图表
 document.addEventListener('DOMContentLoaded', function() {{
     initRankDropdown();
+    initTrendChart();
 }});
 
 // ==================== 获取GSC推荐关键词 ====================
@@ -1751,6 +1994,22 @@ document.addEventListener('DOMContentLoaded', function() {{
                         return
                     stats = dashboard._get_task_stats(user_id)
                     self._send_json(stats)
+
+                elif path == '/api/trend_data':
+                    if not user_id:
+                        self._send_json({'error': '未登录'}, 401)
+                        return
+                    query_params = parse_qs(parsed_path.query)
+                    days = int(query_params.get('days', ['7'])[0])
+                    metric = query_params.get('metric', ['visits'])[0]
+                    # 限制天数范围
+                    if days not in [7, 30, 90]:
+                        days = 7
+                    # 限制指标类型
+                    if metric not in ['visits', 'success_rate', 'rank']:
+                        metric = 'visits'
+                    trend_data = dashboard._get_trend_data(user_id, days=days, metric=metric)
+                    self._send_json(trend_data)
 
                 else:
                     self._send_html('<h1>404 - 页面不存在</h1>', 404)
