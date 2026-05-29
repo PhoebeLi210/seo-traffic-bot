@@ -17,6 +17,7 @@ from src.user_manager import user_manager
 from src.config_manager import config
 from src.visitor import visitor_manager
 from src.monitor import monitor
+from src.proxy_manager import proxy_manager
 from loguru import logger
 
 

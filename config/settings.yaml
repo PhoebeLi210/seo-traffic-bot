@@ -52,6 +52,16 @@ proxy:
   test_url: "http://httpbin.org/ip"
   timeout: 10
 
+# 新增青果网络配置
+qingguo:
+  enabled: true
+  api_url: "http://api.qg.net/proxy"
+  authkey: "635FA31C"   # 替换为你的AuthKey
+  authpwd: "8974AC0436AD"   # 替换为你的AuthPwd
+  protocol: "http"
+  num: 1
+  duration: 1                # IP存活时间（分钟）
+
 # 调度设置
 scheduler:
   enabled: true

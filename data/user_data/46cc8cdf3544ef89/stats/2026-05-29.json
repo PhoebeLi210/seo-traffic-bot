@@ -1,0 +1,43 @@
+{
+  "date": "2026-05-29",
+  "total_visits": 4799,
+  "successful_visits": 0,
+  "failed_visits": 4799,
+  "websites": {
+    "https://www.posaaa.com/": {
+      "total_visits": 693,
+      "successful_visits": 0,
+      "failed_visits": 693
+    },
+    "https://www.lakala.company/": {
+      "total_visits": 687,
+      "successful_visits": 0,
+      "failed_visits": 687
+    },
+    "https://www.lakalachina.com/": {
+      "total_visits": 685,
+      "successful_visits": 0,
+      "failed_visits": 685
+    },
+    "https://www.lakalawuhan.com/": {
+      "total_visits": 684,
+      "successful_visits": 0,
+      "failed_visits": 684
+    },
+    "https://lakala.center/": {
+      "total_visits": 684,
+      "successful_visits": 0,
+      "failed_visits": 684
+    },
+    "https://lakala.work/": {
+      "total_visits": 683,
+      "successful_visits": 0,
+      "failed_visits": 683
+    },
+    "https://www.9501616.com/": {
+      "total_visits": 683,
+      "successful_visits": 0,
+      "failed_visits": 683
+    }
+  }
+}

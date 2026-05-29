@@ -74,6 +74,32 @@ class Settings(BaseModel):
     scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
     monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)
 
+# 在 Config 类中新增 QingguoConfig
+class QingguoConfig(BaseModel):
+    enabled: bool = True
+    api_url: str = "http://api.qg.net/proxy"
+    authkey: str = ""
+    authpwd: str = ""
+    protocol: str = "http"
+    num: int = 1
+    duration: int = 1
+
+class ProxyConfig(BaseModel):
+    enabled: bool = True
+    api_url: str = "http://127.0.0.1:5010/get"
+    fallback_to_direct: bool = True
+    test_url: str = "http://httpbin.org/ip"
+    timeout: int = 10
+
+class Config(BaseModel):
+    browser: BrowserConfig
+    behavior: BehaviorConfig
+    proxy: ProxyConfig
+    qingguo: QingguoConfig  # 新增
+    scheduler: SchedulerConfig
+    monitoring: MonitoringConfig
+
+# 在 load() 方法中确保 qingguo 被加载
 
 class ConfigManager:
     """配置管理器"""

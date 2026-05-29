@@ -10,7 +10,7 @@ from playwright.async_api import async_playwright, Browser, BrowserContext, Page
 from loguru import logger
 
 from .config_manager import config, WebsiteConfig
-# from .proxy_manager import proxy_manager
+from .proxy_manager import proxy_manager
 from .stealth_enhancer import stealth_enhancer
 from .behavior_simulator import behavior_simulator
 
@@ -49,7 +49,7 @@ class WebsiteVisitor:
         
         try:
             # 获取代理
-            proxy = None  # proxy disabled for main service
+            proxy = await proxy_manager.get_proxy_with_retry()
             
             # 启动浏览器 - 使用简化参数提高稳定性
             async with async_playwright() as p:

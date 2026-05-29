@@ -1,0 +1,13 @@
+{
+  "date": "2026-05-28",
+  "total_visits": 15,
+  "successful_visits": 8,
+  "failed_visits": 7,
+  "websites": {
+    "https://www.posaaa.com/": {
+      "total_visits": 15,
+      "successful_visits": 8,
+      "failed_visits": 7
+    }
+  }
+}

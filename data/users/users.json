@@ -1,0 +1,18 @@
+{
+  "users": [
+    {
+      "user_id": "46cc8cdf3544ef89",
+      "username": "test",
+      "email": "516754078@qq.com",
+      "password_hash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+      "api_key": "seo_3031f6ebd12fac97caaa4394a83ccbb9",
+      "created_at": "2026-05-28T00:09:14.334498",
+      "is_active": true,
+      "is_admin": true,
+      "max_websites": 9999,
+      "max_daily_visits": 9999,
+      "plan": "PRO"
+    }
+  ],
+  "updated_at": "2026-05-28T00:09:14.334577"
+}

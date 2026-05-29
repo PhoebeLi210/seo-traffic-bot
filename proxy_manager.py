@@ -7,7 +7,7 @@ import asyncio
 from typing import Optional, Dict
 from loguru import logger
 
-from .config_manager import config
+from src.config_manager import config
 
 
 class ProxyManager:
@@ -44,16 +44,15 @@ class ProxyManager:
         logger.warning("⚠️ 没有可用代理，暂停本次访问")
         return None
 
+    # 修改 _get_qingguo_proxy 方法
     async def _get_qingguo_proxy(self) -> Optional[Dict]:
-        """从青果网络获取代理"""
         try:
             if self._qingguo_manager is None:
-                from .qingguo_proxy_manager import qingguo_proxy_manager
+                from src.qingguo_proxy_manager import qingguo_proxy_manager
                 self._qingguo_manager = qingguo_proxy_manager
-
             proxy = await self._qingguo_manager.get_proxy()
             if proxy:
-                logger.info(f"🍏 使用青果代理: {proxy['ip']}:{proxy['port']}")
+                logger.info(f"✅ 使用青果代理: {proxy['ip']}:{proxy['port']}")
                 return proxy
             else:
                 logger.debug("⚠️ 青果网络无可用代理")
@@ -61,6 +60,10 @@ class ProxyManager:
         except Exception as e:
             logger.debug(f"⚠️ 获取青果代理失败: {e}")
             return None
+
+    # 新增一个配置读取的方法，确保与全局配置同步
+    def reload_config(self):
+        """重新加载配置"""
 
     async def _get_free_proxy(self) -> Optional[Dict]:
         """从免费代理池获取代理"""
