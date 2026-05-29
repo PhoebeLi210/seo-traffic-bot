@@ -1,20 +1,20 @@
 """
 排名查询服务 - 使用 Playwright 渲染搜索引擎页面获取真实排名
+（已移除Google，仅支持国内搜索引擎）
 """
 
 import asyncio
 import re
 from urllib.parse import quote
-from typing import Dict, List
+from typing import Dict
 from loguru import logger
 
 
 class RankService:
     """排名查询服务类 - 使用 Playwright 渲染真实搜索结果"""
 
-    # 搜索引擎URL模板
+    # 搜索引擎URL模板（已移除Google）
     ENGINE_URLS = {
-        'google': 'https://www.google.com/search?q={keyword}&num=50&hl=en',
         'baidu': 'https://www.baidu.com/s?wd={keyword}&rn=50',
         'bing': 'https://www.bing.com/search?q={keyword}&count=50',
         '360': 'https://www.so.com/s?q={keyword}',
@@ -37,6 +37,7 @@ class RankService:
             return {"engine": engine, "device": device, "rank": 0, "found": False}
 
         search_url = url_template.format(keyword=quote(keyword))
+        ua = self.MOBILE_UA if device == "mobile" else self.PC_UA
         is_mobile = device == "mobile"
 
         try:
@@ -50,63 +51,90 @@ class RankService:
                         '--no-sandbox',
                         '--disable-dev-shm-usage',
                         '--disable-gpu',
-                        '--disable-web-security',
-                        '--disable-features=IsolateOrigins,site-per-process',
                     ]
                 )
 
-                # 创建上下文，添加额外的浏览器参数模拟真实用户
-                context_options = {
-                    'ignore_https_errors': True,
-                    'extra_http_headers': {
-                        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                    }
-                }
-
+                # 设置 User-Agent 和设备
                 if is_mobile:
-                    context_options['user_agent'] = self.MOBILE_UA
-                    context_options['viewport'] = {'width': 390, 'height': 844}
-                    context_options['device_scale_factor'] = 3
-                    context_options['is_mobile'] = True
-                    context_options['has_touch'] = True
+                    device_config = p.devices['iPhone 13']
+                    context = await browser.new_context(
+                        user_agent=ua,
+                        **device_config
+                    )
                 else:
-                    context_options['user_agent'] = self.PC_UA
-                    context_options['viewport'] = {'width': 1920, 'height': 1080}
-
-                context = await browser.new_context(**context_options)
-
-                # 添加 cookies 以绕过某些检测
-                if engine == 'baidu':
-                    await context.add_cookies([
-                        {'name': 'BAIDUID', 'value': 'XXXXXX', 'domain': '.baidu.com', 'path': '/'},
-                        {'name': 'BDUSS', 'value': 'XXXXXX', 'domain': '.baidu.com', 'path': '/'},
-                    ])
+                    context = await browser.new_context(
+                        user_agent=ua,
+                        viewport={'width': 1920, 'height': 1080}
+                    )
 
                 page = await context.new_page()
 
                 try:
-                    # 访问搜索页面
-                    await page.goto(search_url, wait_until="domcontentloaded", timeout=30000)
+                    await page.goto(search_url, wait_until="domcontentloaded", timeout=20000)
 
-                    # 针对不同搜索引擎等待搜索结果加载
-                    await self._wait_for_search_results(page, engine)
+                    # 等待搜索结果加载（不同引擎等待不同元素）
+                    if engine == 'baidu':
+                        await page.wait_for_selector('#content_left', timeout=10000)
+                    elif engine == 'bing':
+                        await page.wait_for_selector('#b_results', timeout=10000)
+                    elif engine == '360':
+                        await page.wait_for_selector('.result', timeout=10000)
+                    elif engine == 'sogou':
+                        await page.wait_for_selector('.results', timeout=10000)
+                    else:
+                        await asyncio.sleep(3)
 
-                    # 提取搜索结果链接
-                    links = await self._extract_search_links(page, engine)
+                    # 提取所有搜索结果链接
+                    if engine == 'baidu':
+                        # 百度：从 #content_left 中的结果链接提取
+                        elements = await page.query_selector_all('#content_left .result a[href*="http"]')
+                        links = []
+                        seen = set()
+                        for el in elements:
+                            href = await el.get_attribute('href')
+                            if href and href not in seen and href.startswith('http'):
+                                links.append(href)
+                                seen.add(href)
+                    elif engine == 'bing':
+                        elements = await page.query_selector_all('#b_results a[href^="http"]')
+                        links = []
+                        seen = set()
+                        for el in elements:
+                            href = await el.get_attribute('href')
+                            if href and href not in seen:
+                                links.append(href)
+                                seen.add(href)
+                    else:
+                        # 通用方式：提取所有链接
+                        all_links = await page.eval_on_selector_all('a[href^="http"]', 'els => els.map(e => e.href)')
+                        links = list(dict.fromkeys(all_links))  # 去重保序
 
-                    # 查找目标域名排名
-                    position = self._find_domain_position(links, domain)
+                    # 规范化 domain 用于匹配
+                    domain_lower = domain.lower().replace('https://', '').replace('http://', '').rstrip('/')
+                    if not domain_lower.startswith('www.'):
+                        domain_variants = [domain_lower, 'www.' + domain_lower]
+                    else:
+                        domain_variants = [domain_lower, domain_lower[4:]]
+
+                    position = 0
+                    for i, link in enumerate(links):
+                        link_lower = link.lower()
+                        for variant in domain_variants:
+                            if variant in link_lower:
+                                position = i + 1
+                                break
+                        if position > 0:
+                            break
 
                     if position > 0:
                         logger.info(f"🔍 [{engine}/{device}] '{keyword}' → {domain} 排名第 {position} 位")
                         return {"engine": engine, "device": device, "rank": position, "found": True}
                     else:
                         logger.info(f"🔍 [{engine}/{device}] '{keyword}' → {domain} 未找到 (前{len(links)}名)")
-                        return {"engine": engine, "device": device, "rank": 0, "found": False, "total_results": len(links)}
+                        return {"engine": engine, "device": device, "rank": 0, "found": False}
 
                 except Exception as e:
-                    logger.error(f"排名查询页面处理失败 [{engine}/{device}]: {e}")
+                    logger.error(f"排名查询页面加载失败 [{engine}/{device}]: {e}")
                     return {"engine": engine, "device": device, "rank": 0, "found": False, "error": str(e)}
 
                 finally:
@@ -117,136 +145,22 @@ class RankService:
             logger.error(f"排名查询失败 [{engine}/{device}]: {e}")
             return {"engine": engine, "device": device, "rank": 0, "found": False, "error": str(e)}
 
-    async def _wait_for_search_results(self, page, engine: str):
-        """等待搜索结果加载完成"""
-        if engine == 'baidu':
-            # 百度：等待结果容器加载，可能需要滚动页面触发加载
-            try:
-                await page.wait_for_selector('#content_left', timeout=15000)
-            except:
-                # 如果主容器没加载，等待备用选择器
-                await page.wait_for_selector('.result', timeout=5000)
-            # 滚动页面触发懒加载
-            await page.evaluate('window.scrollTo(0, document.body.scrollHeight / 2)')
-            await asyncio.sleep(1)
-            await page.evaluate('window.scrollTo(0, document.body.scrollHeight)')
-            await asyncio.sleep(1)
-
-        elif engine == 'google':
-            await page.wait_for_selector('#search', timeout=15000)
-            # 滚动加载
-            await page.evaluate('window.scrollTo(0, document.body.scrollHeight / 2)')
-            await asyncio.sleep(0.5)
-
-        elif engine == 'bing':
-            await page.wait_for_selector('#b_results', timeout=15000)
-
-        elif engine == '360':
-            await page.wait_for_selector('.result', timeout=15000)
-
-        elif engine == 'sogou':
-            await page.wait_for_selector('.results', timeout=15000)
-            await asyncio.sleep(2)
-
-        else:
-            await asyncio.sleep(3)
-
-    async def _extract_search_links(self, page, engine: str) -> List[str]:
-        """从搜索结果页面提取链接"""
-        links = []
-
-        try:
-            if engine == 'baidu':
-                # 百度：提取 #content_left 中的所有链接
-                # 先尝试提取真实链接（百度使用跳转）
-                result_links = await page.eval_on_selector_all(
-                    '#content_left h3 a[href], #content_left .c-title a[href], #content_left a[href^="http"]',
-                    '''els => els.map(el => {
-                        let href = el.href || '';
-                        // 百度链接通常是 //www.baidu.com/links?cc=xxx 格式
-                        // 或者有 data-url 属性
-                        return el.getAttribute('data-url') || href;
-                    }).filter(h => h && h.startsWith('http'))'''
-                )
-                links.extend(result_links)
-
-                # 也尝试提取原始 href
-                raw_links = await page.eval_on_selector_all(
-                    '#content_left a[href^="http"]',
-                    'els => els.map(e => e.href).filter(h => h && (h.startsWith("http") || h.startsWith("//")))'
-                )
-                for link in raw_links:
-                    if link not in links:
-                        links.append(link.lstrip('//') if link.startswith('//') else link)
-
-            elif engine == 'google':
-                links = await page.eval_on_selector_all(
-                    '#search a[href^="http"]',
-                    '''els => els.map(el => {
-                        let href = el.href || '';
-                        // 跳过 Google 内部链接
-                        if (href.includes('google.com') && !href.includes('webcache')) return null;
-                        return href;
-                    }).filter(h => h)'''
-                )
-
-            else:
-                # 通用方式
-                all_links = await page.eval_on_selector_all(
-                    'a[href^="http"]',
-                    '''els => els.map(e => {
-                        let href = e.href || '';
-                        // 过滤掉明显不是搜索结果的链接
-                        if (href.includes('baidu.com') && !href.includes('/s?')) return null;
-                        if (href.includes('google.com/search')) return null;
-                        if (href.includes('bing.com/search')) return null;
-                        return href;
-                    }).filter(h => h)'''
-                )
-                links.extend(all_links)
-
-        except Exception as e:
-            logger.error(f"提取搜索链接失败: {e}")
-
-        # 去重
-        seen = set()
-        unique_links = []
-        for link in links:
-            if link and link not in seen:
-                seen.add(link)
-                unique_links.append(link)
-
-        return unique_links
-
-    def _find_domain_position(self, links: List[str], domain: str) -> int:
-        """在链接列表中查找域名的排名位置"""
-        domain_lower = domain.lower().replace('https://', '').replace('http://', '').rstrip('/')
-        # 移除 www. 前缀以提高匹配率
-        if domain_lower.startswith('www.'):
-            domain_variants = [domain_lower, domain_lower[4:]]
-        else:
-            domain_variants = [domain_lower, 'www.' + domain_lower]
-
-        for i, link in enumerate(links):
-            link_lower = link.lower()
-            for variant in domain_variants:
-                if variant in link_lower:
-                    return i + 1  # 排名从1开始
-
-        return 0  # 未找到
-
     def check_rank(self, keyword: str, domain: str, engine: str, device: str = "pc") -> Dict:
         """
-        同步接口：查询排名
+        同步接口：查询排名（在事件循环中运行异步方法）
         """
         try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # 如果已有事件循环在运行，创建新线程
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    future = pool.submit(asyncio.run, self.check_rank_async(keyword, domain, engine, device))
+                    return future.result(timeout=30)
+            else:
+                return asyncio.run(self.check_rank_async(keyword, domain, engine, device))
+        except RuntimeError:
             return asyncio.run(self.check_rank_async(keyword, domain, engine, device))
-        except RuntimeError as e:
-            # 如果已经有事件循环在运行
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as pool:
-                future = pool.submit(asyncio.run, self.check_rank_async(keyword, domain, engine, device))
-                return future.result(timeout=45)
 
     def check_rank_multiple(self, keyword: str, domain: str, engines: list, device: str = "pc") -> list:
         """批量查询多个搜索引擎的排名"""
